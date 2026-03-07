@@ -1,0 +1,111 @@
+import { CDPManager } from '../cdp';
+import { isDomainAllowed } from '../security/domain-guard';
+
+export interface RemoteCommand {
+  id: number;
+  method: string; // CDP method
+  params?: Record<string, unknown>;
+  tabId: number;
+}
+
+export interface RemoteResult {
+  id: number;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+/**
+ * Tab mutex: tracks which tabs are under which control mode.
+ * A tab is either under local script control (Modes 1/2) OR remote control (Mode 3).
+ */
+const tabOwnership = new Map<number, 'local' | 'remote'>();
+
+export function claimTab(tabId: number, mode: 'local' | 'remote'): boolean {
+  const current = tabOwnership.get(tabId);
+  if (current && current !== mode) return false;
+  tabOwnership.set(tabId, mode);
+  return true;
+}
+
+export function releaseTab(tabId: number): void {
+  tabOwnership.delete(tabId);
+}
+
+export function getTabOwner(tabId: number): 'local' | 'remote' | null {
+  return tabOwnership.get(tabId) ?? null;
+}
+
+/**
+ * Reset all tab ownership state. Used for testing.
+ */
+export function resetTabOwnership(): void {
+  tabOwnership.clear();
+}
+
+/**
+ * Execute a remote CDP command with domain validation.
+ */
+export async function executeRemoteCommand(
+  cdp: CDPManager,
+  command: RemoteCommand,
+  allowedDomains: string[],
+  getTabUrl: (tabId: number) => Promise<string>,
+): Promise<RemoteResult> {
+  try {
+    // Check tab ownership
+    const owner = getTabOwner(command.tabId);
+    if (owner === 'local') {
+      return {
+        id: command.id,
+        ok: false,
+        error: 'Tab is under local script control',
+      };
+    }
+
+    // Claim for remote if not already
+    if (!claimTab(command.tabId, 'remote')) {
+      return {
+        id: command.id,
+        ok: false,
+        error: 'Failed to claim tab for remote control',
+      };
+    }
+
+    // Domain validation
+    const tabUrl = await getTabUrl(command.tabId);
+    if (!isDomainAllowed(tabUrl, allowedDomains)) {
+      return {
+        id: command.id,
+        ok: false,
+        error: `Domain not allowed: ${tabUrl}`,
+      };
+    }
+
+    // Input lock: block text input and form submission unless explicitly unlocked
+    const blockedMethods = [
+      'Input.dispatchKeyEvent',
+      'Input.insertText',
+      'Input.imeSetComposition',
+    ];
+    if (blockedMethods.includes(command.method)) {
+      return {
+        id: command.id,
+        ok: false,
+        error: 'Text input blocked in remote mode. Use unlock-input command first.',
+      };
+    }
+
+    // Ensure debugger attached
+    if (!cdp.isAttached(command.tabId)) {
+      await cdp.attach(command.tabId);
+    }
+
+    // Execute CDP command
+    const result = await cdp.send(command.tabId, command.method, command.params);
+
+    return { id: command.id, ok: true, result };
+  } catch (err: any) {
+    return { id: command.id, ok: false, error: err.message };
+  }
+}
