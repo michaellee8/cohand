@@ -1,17 +1,36 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useTasksStore } from '../stores/tasks-store';
+import { useWizardStore } from '../stores/wizard-store';
 import { TaskCard } from '../components/TaskCard';
 import { TaskDetail } from '../components/TaskDetail';
 import { NotificationFeed } from '../components/NotificationFeed';
+import { CreateTaskWizard } from '../components/CreateTaskWizard';
 
 export function TasksPage() {
   const { tasks, selectedTaskId, runs, notifications, loading,
     fetchTasks, selectTask, fetchNotifications, runTask, deleteTask, markNotificationRead } = useTasksStore();
+  const [showWizard, setShowWizard] = useState(false);
+  const resetWizard = useWizardStore(state => state.reset);
 
   useEffect(() => {
     fetchTasks();
     fetchNotifications();
   }, []);
+
+  const handleWizardComplete = () => {
+    setShowWizard(false);
+    resetWizard();
+    fetchTasks();
+  };
+
+  const handleWizardCancel = () => {
+    setShowWizard(false);
+    resetWizard();
+  };
+
+  if (showWizard) {
+    return <CreateTaskWizard onComplete={handleWizardComplete} onCancel={handleWizardCancel} />;
+  }
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
 
@@ -30,7 +49,10 @@ export function TasksPage() {
     <div className="flex flex-col h-full">
       <div className="p-4 flex items-center justify-between">
         <h2 className="text-base font-semibold">Tasks</h2>
-        <button className="bg-blue-500 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-blue-600 transition-colors">
+        <button
+          onClick={() => setShowWizard(true)}
+          className="bg-blue-500 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-blue-600 transition-colors"
+        >
           + New Task
         </button>
       </div>
