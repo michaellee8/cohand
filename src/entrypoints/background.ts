@@ -1,3 +1,4 @@
 export default defineBackground(() => {
-  console.log('Cohand service worker started');
+  console.log('[Cohand] Service worker started');
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 });
