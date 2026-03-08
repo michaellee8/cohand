@@ -1,6 +1,7 @@
 import { validateToken } from './remote-auth';
 import { executeRemoteCommand, releaseTab, type RemoteCommand, type RemoteResult } from './remote-relay';
 import { CDPManager } from '../cdp';
+import { getDomainPermissions } from '../storage';
 
 interface RemoteSession {
   extensionId: string;
@@ -50,9 +51,17 @@ export function createRemoteHandler(
         sendResponse({ ok: false, error: 'Invalid token' });
         return true;
       }
+      // Intersect client-requested domains with user's configured permissions
+      const configuredPermissions = await getDomainPermissions();
+      const configuredDomains = new Set(configuredPermissions.map(p => p.domain));
+      const requestedDomains: string[] = message.allowedDomains || [];
+      const allowedDomains = configuredDomains.size > 0
+        ? requestedDomains.filter(d => configuredDomains.has(d))
+        : []; // No configured permissions = no domains allowed
+
       activeSessions.set(extensionId, {
         extensionId,
-        allowedDomains: message.allowedDomains || [],
+        allowedDomains,
         authenticatedAt: Date.now(),
       });
       sendResponse({ ok: true });

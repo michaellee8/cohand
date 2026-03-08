@@ -361,6 +361,11 @@ describe('remote-server', () => {
     const token = await getOrCreateToken();
     mockDebugger.sendCommand.mockResolvedValue({ root: { nodeId: 1 } });
 
+    // Configure domain permission so intersection allows example.com
+    await mockStorage.local.set({
+      domainPermissions: [{ domain: 'example.com', addedAt: new Date().toISOString() }],
+    });
+
     // Authenticate first
     await callHandler({
       type: 'remote:auth',
@@ -469,6 +474,66 @@ describe('remote-server', () => {
     });
 
     // Command should fail due to domain not being allowed
+    const response = await callHandler({
+      type: 'remote:command',
+      id: 1,
+      method: 'DOM.getDocument',
+      tabId: 10,
+    });
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain('Domain not allowed');
+  });
+
+  it('intersects client domains with configured permissions', async () => {
+    // Set up configured domain permissions
+    await mockStorage.local.set({
+      domainPermissions: [
+        { domain: 'example.com', addedAt: new Date().toISOString() },
+        { domain: 'trusted.com', addedAt: new Date().toISOString() },
+      ],
+    });
+
+    const token = await getOrCreateToken();
+
+    // Client requests example.com and evil.com, but only example.com is configured
+    await callHandler({
+      type: 'remote:auth',
+      token,
+      allowedDomains: ['example.com', 'evil.com'],
+    });
+
+    // Commands to example.com should work
+    mockDebugger.sendCommand.mockResolvedValue({ nodeId: 1 });
+    const okResponse = await callHandler({
+      type: 'remote:command',
+      id: 1,
+      method: 'DOM.getDocument',
+      tabId: 10,
+    });
+    expect(okResponse.ok).toBe(true);
+
+    // Commands to evil.com should be blocked
+    getTabUrl.mockResolvedValue('https://evil.com');
+    const blockedResponse = await callHandler({
+      type: 'remote:command',
+      id: 2,
+      method: 'DOM.getDocument',
+      tabId: 11,
+    });
+    expect(blockedResponse.ok).toBe(false);
+    expect(blockedResponse.error).toContain('Domain not allowed');
+  });
+
+  it('allows no domains when no permissions configured', async () => {
+    const token = await getOrCreateToken();
+
+    await callHandler({
+      type: 'remote:auth',
+      token,
+      allowedDomains: ['example.com'],
+    });
+
+    // Even though client requested example.com, no permissions configured = no domains
     const response = await callHandler({
       type: 'remote:command',
       id: 1,
