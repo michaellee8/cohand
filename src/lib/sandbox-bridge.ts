@@ -87,8 +87,8 @@ export class SandboxBridge {
     this.sendToSandbox(request);
   }
 
-  // Listen for execution results from sandbox
-  onExecutionResult(callback: (result: ExecuteScriptResult) => void): void {
+  // Listen for execution results from sandbox. Returns cleanup function.
+  onExecutionResult(callback: (result: ExecuteScriptResult) => void): () => void {
     const handler = (event: MessageEvent) => {
       if (event.source !== this.iframe?.contentWindow) return;
       if (event.data.type === 'execute-script-result') {
@@ -96,6 +96,7 @@ export class SandboxBridge {
       }
     };
     window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
   }
 
   private sendToSandbox(data: unknown): void {

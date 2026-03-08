@@ -212,7 +212,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   createTask: async () => {
     set({ loading: true, error: null });
     try {
-      const { description, domains, generatedScript, schedule } = get();
+      const { description, domains, generatedScript, schedule, astValid, securityPassed } = get();
       await chrome.runtime.sendMessage({
         type: 'CREATE_TASK',
         task: {
@@ -227,6 +227,8 @@ export const useWizardStore = create<WizardState>((set, get) => ({
           updatedAt: new Date().toISOString(),
         },
         scriptSource: generatedScript,
+        astValidationPassed: astValid,
+        securityReviewPassed: securityPassed,
       });
       set({ loading: false });
     } catch (err: unknown) {

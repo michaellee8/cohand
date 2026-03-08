@@ -56,6 +56,8 @@ export default defineBackground(() => {
   const taskTabMap = new Map<string, number>();
   // Track in-flight execution abort controllers
   const executionAbortControllers = new Map<string, AbortController>();
+  // Override domains for test executions (temp taskId -> domains)
+  const testDomainOverrides = new Map<string, string[]>();
 
   let db: IDBDatabase;
 
@@ -102,6 +104,9 @@ export default defineBackground(() => {
       const handlerCtx: HandlerContext = {
         cdp,
         getAllowedDomains: async (taskId: string) => {
+          // Check test domain overrides first (for TEST_SCRIPT temp tasks)
+          const override = testDomainOverrides.get(taskId);
+          if (override) return override;
           const task = await getTask(db, taskId);
           return task?.allowedDomains ?? [];
         },
@@ -155,9 +160,9 @@ export default defineBackground(() => {
         source: msg.scriptSource,
         checksum: await sha256(msg.scriptSource),
         generatedBy: 'explorer',
-        astValidationPassed: true, // validated before reaching here
-        securityReviewPassed: true,
-        reviewDetails: [],
+        astValidationPassed: msg.astValidationPassed ?? false,
+        securityReviewPassed: msg.securityReviewPassed ?? false,
+        reviewDetails: msg.reviewDetails ?? [],
         createdAt: new Date().toISOString(),
       };
       await putScriptVersion(db, sv);
@@ -390,6 +395,7 @@ export default defineBackground(() => {
       const tempTaskId = `test-${Date.now()}`;
       taskTabMap.set(tempTaskId, tabId);
       resetCumulativeReads(tempTaskId);
+      testDomainOverrides.set(tempTaskId, domains ?? []);
 
       try {
         await ensureOffscreen();
@@ -414,6 +420,7 @@ export default defineBackground(() => {
         }
       } finally {
         taskTabMap.delete(tempTaskId);
+        testDomainOverrides.delete(tempTaskId);
         releaseTab(tabId);
       }
     } catch (err: unknown) {

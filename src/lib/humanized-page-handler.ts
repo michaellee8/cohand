@@ -13,7 +13,7 @@ import {
   humanizedScroll,
 } from './humanize';
 import { createPRNG, randomInRange } from './prng';
-import { isDomainAllowed } from './security/domain-guard';
+import { isDomainAllowed, isSensitivePage } from './security/domain-guard';
 import { MAX_TEXT_CONTENT_LENGTH, MAX_CUMULATIVE_READS } from '../constants';
 import { RPCHandler, type RPCMethodHandler } from './rpc-handler';
 
@@ -37,14 +37,19 @@ export function getCumulativeReads(taskId: string): number {
   return cumulativeReads.get(taskId) ?? 0;
 }
 
+export class CumulativeReadLimitError extends Error {
+  constructor(taskId: string, total: number) {
+    super(`Task ${taskId} exceeded cumulative read limit: ${total} bytes`);
+    this.name = 'CumulativeReadLimitError';
+  }
+}
+
 function trackRead(taskId: string, bytes: number): void {
   const current = cumulativeReads.get(taskId) ?? 0;
   const newTotal = current + bytes;
   cumulativeReads.set(taskId, newTotal);
   if (newTotal > MAX_CUMULATIVE_READS) {
-    console.warn(
-      `[Cohand] Task ${taskId} exceeded cumulative read limit: ${newTotal} bytes`,
-    );
+    throw new CumulativeReadLimitError(taskId, newTotal);
   }
 }
 
@@ -89,6 +94,15 @@ export function registerPageMethods(
             },
           };
         }
+        if (isSensitivePage(tabUrl)) {
+          return {
+            ok: false,
+            error: {
+              type: 'SensitivePage',
+              message: `Blocked: sensitive page detected: ${tabUrl}`,
+            },
+          };
+        }
 
         const value = await fn(rpc, ctx);
         return { ok: true, value };
@@ -103,6 +117,12 @@ export function registerPageMethods(
           return {
             ok: false,
             error: { type: 'NavigationChanged', message: err.message },
+          };
+        }
+        if (err instanceof CumulativeReadLimitError) {
+          return {
+            ok: false,
+            error: { type: 'ReadLimitExceeded', message: err.message },
           };
         }
         const message =

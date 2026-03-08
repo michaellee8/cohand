@@ -44,7 +44,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       // Set up result listener before sending execution request
       const result = await new Promise<ExecuteScriptResult>((resolve) => {
-        bridge.onExecutionResult((res) => {
+        let cleanup: (() => void) | undefined;
+        cleanup = bridge.onExecutionResult((res) => {
+          cleanup?.();
           resolve(res);
         });
 
