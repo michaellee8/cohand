@@ -419,6 +419,28 @@ export function registerPageMethods(
           }
           return 1; // AX selectors don't support count easily
         }
+        case 'all': {
+          // Return array of locator proxies (represented as indexes)
+          // For CSS selectors, query all matching elements and return count
+          // The script-side proxy handles creating sub-locators
+          if (locatorMethod === 'locator') {
+            const doc = (await ctx.cdp.send(tabId, 'DOM.getDocument', {
+              depth: 0,
+              pierce: true,
+            })) as { root: { nodeId: number } };
+            const allNodes = (await ctx.cdp.send(
+              tabId,
+              'DOM.querySelectorAll',
+              {
+                nodeId: doc.root.nodeId,
+                selector: locatorArgs[0],
+              },
+            )) as { nodeIds?: number[] } | undefined;
+            const count = allNodes?.nodeIds?.length ?? 0;
+            return Array.from({ length: count }, (_, i) => i);
+          }
+          return [0]; // AX selectors return single match
+        }
         default:
           throw new Error(`Unknown locator action: ${actionMethod}`);
       }
