@@ -7,8 +7,8 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import 'fake-indexeddb/auto';
-import { MessageRouter } from '../lib/message-router';
-import { openDB } from '../lib/db';
+import { MessageRouter } from './message-router';
+import { openDB } from './db';
 import {
   putTask,
   getTask,
@@ -18,20 +18,20 @@ import {
   addScriptRun,
   putTaskState,
   getTaskState,
-} from '../lib/db-helpers';
+} from './db-helpers';
 import {
   getRecentNotifications,
   markAsRead,
   getUnreadCount,
   deliverNotification,
-} from '../lib/notifications';
-import { getUsageSummary, recordLlmUsage } from '../lib/llm-usage';
+} from './notifications';
+import { getUsageSummary, recordLlmUsage } from './llm-usage';
 import {
   addDomainPermission,
   removeDomainPermission,
   getDomainPermissions,
-} from '../lib/storage';
-import type { Task, ScriptVersion, ScriptRun, TaskNotification } from '../types';
+} from './storage';
+import type { Task, ScriptVersion, ScriptRun, TaskNotification } from '../types/index';
 
 // ---------------------------------------------------------------------------
 // Chrome API mocks

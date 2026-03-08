@@ -60,11 +60,28 @@ export default defineBackground(() => {
   let db: IDBDatabase;
 
   // ---------------------------------------------------------------------------
-  // Helper: get tab URL
+  // Helpers
   // ---------------------------------------------------------------------------
   async function getTabUrl(tabId: number): Promise<string> {
     const tab = await chrome.tabs.get(tabId);
     return tab.url || '';
+  }
+
+  async function ensureOffscreen(): Promise<void> {
+    try {
+      const existingContexts = await chrome.runtime.getContexts({
+        contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+      });
+      if (existingContexts.length === 0) {
+        await chrome.offscreen.createDocument({
+          url: 'offscreen.html',
+          reasons: [chrome.offscreen.Reason.WORKERS],
+          justification: 'QuickJS WASM sandbox for script execution',
+        });
+      }
+    } catch (err) {
+      console.error('[Cohand] Failed to create offscreen document:', err);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -247,17 +264,16 @@ export default defineBackground(() => {
       const taskState = await getTaskState(db, taskId);
       const currentState = taskState?.state ?? {};
 
+      // Ensure offscreen document is created (hosts the sandbox iframe)
+      await ensureOffscreen();
+
       // Attach debugger
       await cdp.attach(tabId);
 
       try {
-        // Execute via offscreen/sandbox bridge (the offscreen doc handles this
-        // via the long-lived port RPC mechanism)
-        // For now, create a run record. The actual script execution flows through
-        // the sandbox -> offscreen -> RPC -> service worker pipeline.
-        // The service worker's role here is to set up the context and record results.
-
-        // Send execution request to offscreen document via chrome.runtime messaging
+        // Send execution request to offscreen document.
+        // Flow: service worker → offscreen doc → sandbox iframe → script runs
+        // RPCs flow back: sandbox → offscreen → service worker RPC port → CDP
         const execResponse = await chrome.runtime.sendMessage({
           type: 'SANDBOX_EXECUTE',
           taskId,
@@ -380,6 +396,7 @@ export default defineBackground(() => {
       resetCumulativeReads(tempTaskId);
 
       try {
+        await ensureOffscreen();
         await cdp.attach(tabId);
         try {
           // Execute test via sandbox
@@ -477,20 +494,7 @@ export default defineBackground(() => {
   // ---------------------------------------------------------------------------
 
   router.on('ENSURE_OFFSCREEN', async () => {
-    try {
-      const existingContexts = await chrome.runtime.getContexts({
-        contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
-      });
-      if (existingContexts.length === 0) {
-        await chrome.offscreen.createDocument({
-          url: 'offscreen.html',
-          reasons: [chrome.offscreen.Reason.WORKERS],
-          justification: 'QuickJS WASM sandbox for script execution',
-        });
-      }
-    } catch (err) {
-      console.error('[Cohand] Failed to create offscreen document:', err);
-    }
+    await ensureOffscreen();
     return { ok: true as const };
   });
 
