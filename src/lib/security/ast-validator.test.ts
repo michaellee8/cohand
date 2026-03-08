@@ -58,6 +58,22 @@ describe('validateAST', () => {
       expect(result.valid).toBe(false);
     });
 
+    it('blocks Function assigned to variable (identifier bypass)', () => {
+      const result = validateAST(`const f = Function; f("evil")()`);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('Function'))).toBe(true);
+    });
+
+    it('blocks eval assigned to variable', () => {
+      const result = validateAST(`const e = eval; e("alert(1)")`);
+      expect(result.valid).toBe(false);
+    });
+
+    it('blocks Reflect reference without call', () => {
+      const result = validateAST(`const r = Reflect; r.apply(fn, null, [])`);
+      expect(result.valid).toBe(false);
+    });
+
     it('blocks fetch()', () => {
       const result = validateAST(`fetch('https://evil.com')`);
       expect(result.valid).toBe(false);

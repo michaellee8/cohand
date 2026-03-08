@@ -39,12 +39,10 @@ export function validateAST(source: string): ASTValidationResult {
   }
 
   walk.simple(ast, {
-    // Block direct calls to dangerous globals
-    CallExpression(node) {
-      if (node.callee.type === 'Identifier') {
-        if (BLOCKED_GLOBALS.has(node.callee.name)) {
-          errors.push(`Blocked call to '${node.callee.name}' at line ${node.loc?.start?.line}`);
-        }
+    // Block ALL references to dangerous globals (not just call sites)
+    Identifier(node) {
+      if (BLOCKED_GLOBALS.has(node.name)) {
+        errors.push(`Blocked reference to '${node.name}' at line ${node.loc?.start?.line}`);
       }
     },
 
@@ -74,15 +72,6 @@ export function validateAST(source: string): ASTValidationResult {
       if (node.computed && node.property.type === 'Literal' && typeof node.property.value === 'string') {
         if (BLOCKED_MEMBERS.has(node.property.value)) {
           errors.push(`Blocked computed access to '["${node.property.value}"]'`);
-        }
-      }
-    },
-
-    // Block new on dangerous globals (Function, Proxy, WebSocket, etc.)
-    NewExpression(node) {
-      if (node.callee.type === 'Identifier') {
-        if (BLOCKED_GLOBALS.has(node.callee.name)) {
-          errors.push(`Blocked new ${node.callee.name}()`);
         }
       }
     },
