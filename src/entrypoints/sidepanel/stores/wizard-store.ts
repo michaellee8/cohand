@@ -1,4 +1,10 @@
 import { create } from 'zustand';
+import { LLMClient, createSecurityReviewClients } from '../../../lib/llm-client';
+import { generateScript, type ExplorationResult } from '../../../lib/explorer';
+import { securityReview } from '../../../lib/security/security-review';
+import { validateAST } from '../../../lib/security/ast-validator';
+import { getSettings, getEncryptedTokens, getEncryptionKeyEncoded } from '../../../lib/storage';
+import { decrypt, importKey } from '../../../lib/crypto';
 
 export type WizardStep = 'describe' | 'domains' | 'observe' | 'review' | 'test' | 'schedule';
 
@@ -29,6 +35,29 @@ interface WizardState {
 }
 
 const STEPS: WizardStep[] = ['describe', 'domains', 'observe', 'review', 'test', 'schedule'];
+
+/**
+ * Initialize an LLM client from stored settings and encrypted token.
+ */
+async function initLLMClient(): Promise<LLMClient> {
+  const settings = await getSettings();
+  const tokens = await getEncryptedTokens();
+
+  let token = '';
+  const keyEncoded = await getEncryptionKeyEncoded();
+  if (keyEncoded && tokens.apiKey) {
+    const key = await importKey(keyEncoded);
+    token = await decrypt(key, tokens.apiKey);
+  } else if (tokens.apiKey) {
+    token = tokens.apiKey;
+  }
+
+  if (!token) {
+    throw new Error('No API key configured. Go to Settings to add one.');
+  }
+
+  return new LLMClient(settings, token);
+}
 
 export const useWizardStore = create<WizardState>((set, get) => ({
   step: 'describe',
@@ -75,17 +104,73 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) throw new Error('No active tab');
 
-      const response = await chrome.runtime.sendMessage({
-        type: 'GENERATE_SCRIPT',
+      // Step 1: Get page observation data from service worker
+      const treeResponse = await chrome.runtime.sendMessage({
+        type: 'GET_A11Y_TREE',
         tabId: tab.id,
-        description: get().description,
-        domains: get().domains,
       });
 
+      let screenshot: string | undefined;
+      try {
+        const screenshotResponse = await chrome.runtime.sendMessage({
+          type: 'SCREENSHOT',
+          tabId: tab.id,
+        });
+        screenshot = screenshotResponse.dataUrl;
+      } catch {
+        // Screenshot may fail on restricted pages
+      }
+
+      const observation: ExplorationResult = {
+        a11yTree: JSON.stringify(treeResponse.tree, null, 2),
+        screenshot,
+        url: tab.url || '',
+        title: tab.title || '',
+      };
+
+      // Step 2: Initialize LLM client (side panel makes all LLM calls)
+      const client = await initLLMClient();
+
+      // Step 3: Generate script via LLM
+      const genResult = await generateScript(
+        client,
+        get().description,
+        observation,
+        get().domains,
+      );
+
+      // Step 4: Validate AST
+      const astResult = validateAST(genResult.source);
+
+      // Step 5: Run dual-model security review (if AST passes)
+      let secPassed = false;
+      if (astResult.valid) {
+        try {
+          const settings = await getSettings();
+          const tokens = await getEncryptedTokens();
+          let token = '';
+          const keyEncoded = await getEncryptionKeyEncoded();
+          if (keyEncoded && tokens.apiKey) {
+            const key = await importKey(keyEncoded);
+            token = await decrypt(key, tokens.apiKey);
+          } else if (tokens.apiKey) {
+            token = tokens.apiKey;
+          }
+
+          if (token) {
+            const reviewClients = createSecurityReviewClients(settings, token);
+            const reviewResult = await securityReview(genResult.source, reviewClients);
+            secPassed = reviewResult.approved;
+          }
+        } catch (err) {
+          console.warn('[Cohand] Security review failed, marking as not passed:', err);
+        }
+      }
+
       set({
-        generatedScript: response.source,
-        astValid: response.astValid,
-        securityPassed: response.securityPassed ?? false,
+        generatedScript: genResult.source,
+        astValid: astResult.valid,
+        securityPassed: secPassed,
         loading: false,
       });
     } catch (err: unknown) {

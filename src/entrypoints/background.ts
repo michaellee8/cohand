@@ -350,12 +350,13 @@ export default defineBackground(() => {
   // ---------------------------------------------------------------------------
 
   router.on('GENERATE_SCRIPT', async (msg) => {
-    // Forward a11y tree request to content script
+    // Return page observation data. Per the design doc, the side panel
+    // makes all LLM calls — the wizard store handles script generation,
+    // AST validation, and security review directly.
     const treeResponse = await chrome.tabs.sendMessage(msg.tabId, {
       type: 'GET_A11Y_TREE',
     });
 
-    // Get screenshot
     const tab = await chrome.tabs.get(msg.tabId);
     let screenshot: string | undefined;
     try {
@@ -364,15 +365,10 @@ export default defineBackground(() => {
       // May fail on restricted pages
     }
 
-    // The actual LLM call happens in the side panel (per design doc).
-    // This handler returns the observation data for the side panel to use.
-    // However, the wizard store expects source back, so we return observation data
-    // and the side panel will call the LLM from there.
     return {
       source: '',
       astValid: false,
       securityPassed: false,
-      // Observation data attached for the side panel
       observation: {
         a11yTree: JSON.stringify(treeResponse?.tree ?? treeResponse, null, 2),
         screenshot,
