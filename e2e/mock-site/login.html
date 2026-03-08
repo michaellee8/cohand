@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cohand Test - Login</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; padding: 2rem; background: #f9fafb; color: #111827; }
+    nav { margin-bottom: 2rem; }
+    nav a { margin-right: 1rem; color: #2563eb; text-decoration: underline; }
+    .login-form { max-width: 20rem; margin: 2rem auto; padding: 2rem; background: white; border: 1px solid #e5e7eb; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .login-form h2 { margin-bottom: 1rem; text-align: center; }
+    .field { margin-bottom: 1rem; }
+    label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
+    input { width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-size: 1rem; }
+    input[type="password"] { letter-spacing: 0.15em; }
+    button[type="submit"] { width: 100%; padding: 0.5rem; background: #3b82f6; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 1rem; font-weight: 600; }
+    .sensitive-warning { margin-top: 1rem; padding: 0.75rem; background: #fef2f2; border: 1px solid #fecaca; border-radius: 0.375rem; color: #991b1b; font-size: 0.875rem; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/form.html">Form</a>
+    <a href="/dynamic.html">Dynamic</a>
+    <a href="/login.html">Login</a>
+  </nav>
+
+  <div class="login-form">
+    <h2>Sign In</h2>
+    <form id="login-form" autocomplete="on">
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required />
+      </div>
+      <button type="submit">Log In</button>
+    </form>
+    <div class="sensitive-warning">
+      This is a sensitive page with password fields. Cohand should detect this and apply extra caution.
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('login-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      alert('Login submitted (mock)');
+    });
+  </script>
+</body>
+</html>

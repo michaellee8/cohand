@@ -1,0 +1,14 @@
+{
+  "name": "cohand-mock-site",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5199",
+    "build": "vite build",
+    "preview": "vite preview --port 5199"
+  },
+  "dependencies": {
+    "vite": "^7.3.1"
+  }
+}

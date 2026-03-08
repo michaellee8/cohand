@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cohand Test - Home</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; padding: 2rem; background: #f9fafb; color: #111827; }
+    h1 { margin-bottom: 1rem; }
+    nav { margin-bottom: 2rem; }
+    nav a { margin-right: 1rem; color: #2563eb; text-decoration: underline; }
+    .price-display { font-size: 2rem; font-weight: bold; color: #059669; margin: 1rem 0; }
+    .like-btn { padding: 0.5rem 1.5rem; background: #3b82f6; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 1rem; }
+    .like-btn:hover { background: #2563eb; }
+    .like-count { margin-left: 0.5rem; color: #6b7280; }
+    .item-list { list-style: none; margin-top: 1rem; }
+    .item-list li { padding: 0.75rem 1rem; background: white; border: 1px solid #e5e7eb; border-radius: 0.375rem; margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/form.html">Form</a>
+    <a href="/dynamic.html">Dynamic</a>
+    <a href="/login.html">Login</a>
+  </nav>
+
+  <h1>Cohand Test Homepage</h1>
+
+  <div class="price-display" data-testid="price">$49.99</div>
+
+  <button class="like-btn" id="like-btn" aria-label="Like this item">
+    ❤ Like
+  </button>
+  <span class="like-count" id="like-count">0 likes</span>
+
+  <h2 style="margin-top: 2rem;">Items</h2>
+  <ul class="item-list" id="item-list">
+    <li data-item-id="1">Widget Alpha</li>
+    <li data-item-id="2">Widget Beta</li>
+    <li data-item-id="3">Widget Gamma</li>
+    <li data-item-id="4">Widget Delta</li>
+    <li data-item-id="5">Widget Epsilon</li>
+  </ul>
+
+  <script>
+    let likes = 0;
+    document.getElementById('like-btn').addEventListener('click', () => {
+      likes++;
+      document.getElementById('like-count').textContent = likes + ' like' + (likes !== 1 ? 's' : '');
+    });
+  </script>
+</body>
+</html>
