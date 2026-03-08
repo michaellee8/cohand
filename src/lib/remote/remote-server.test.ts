@@ -189,49 +189,21 @@ describe('remote-relay', () => {
       expect(result.result).toEqual({ nodeId: 42 });
     });
 
-    it('blocks text input by default', async () => {
+    it('blocks text input methods via CDP whitelist', async () => {
       getTabUrl.mockResolvedValue('https://www.example.com');
 
-      const command: RemoteCommand = {
-        id: 2,
-        method: 'Input.dispatchKeyEvent',
-        params: { type: 'keyDown', key: 'a' },
-        tabId: 10,
-      };
+      for (const method of ['Input.dispatchKeyEvent', 'Input.insertText', 'Input.imeSetComposition']) {
+        const command: RemoteCommand = {
+          id: 2,
+          method,
+          params: { type: 'keyDown', key: 'a' },
+          tabId: 10,
+        };
 
-      const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
-      expect(result.ok).toBe(false);
-      expect(result.error).toContain('Text input blocked');
-    });
-
-    it('blocks Input.insertText', async () => {
-      getTabUrl.mockResolvedValue('https://www.example.com');
-
-      const command: RemoteCommand = {
-        id: 3,
-        method: 'Input.insertText',
-        params: { text: 'hello' },
-        tabId: 10,
-      };
-
-      const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
-      expect(result.ok).toBe(false);
-      expect(result.error).toContain('Text input blocked');
-    });
-
-    it('blocks Input.imeSetComposition', async () => {
-      getTabUrl.mockResolvedValue('https://www.example.com');
-
-      const command: RemoteCommand = {
-        id: 4,
-        method: 'Input.imeSetComposition',
-        params: { text: 'hello' },
-        tabId: 10,
-      };
-
-      const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
-      expect(result.ok).toBe(false);
-      expect(result.error).toContain('Text input blocked');
+        const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+        expect(result.ok).toBe(false);
+        expect(result.error).toContain('not allowed');
+      }
     });
 
     it('rejects commands for disallowed domains', async () => {
@@ -293,6 +265,64 @@ describe('remote-relay', () => {
       expect(result.ok).toBe(false);
       expect(result.error).toBe('CDP error');
       expect(result.id).toBe(8);
+    });
+
+    it('blocks Runtime.evaluate via CDP whitelist', async () => {
+      getTabUrl.mockResolvedValue('https://example.com');
+
+      const command: RemoteCommand = {
+        id: 10,
+        method: 'Runtime.evaluate',
+        params: { expression: 'document.cookie' },
+        tabId: 10,
+      };
+
+      const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('CDP method not allowed');
+    });
+
+    it('blocks Network.enable via CDP whitelist', async () => {
+      getTabUrl.mockResolvedValue('https://example.com');
+
+      const command: RemoteCommand = {
+        id: 11,
+        method: 'Network.enable',
+        tabId: 10,
+      };
+
+      const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('CDP method not allowed');
+    });
+
+    it('allows whitelisted DOM.getDocument', async () => {
+      getTabUrl.mockResolvedValue('https://example.com');
+      mockDebugger.sendCommand.mockResolvedValue({ root: { nodeId: 1 } });
+
+      const command: RemoteCommand = {
+        id: 12,
+        method: 'DOM.getDocument',
+        params: { depth: 1 },
+        tabId: 10,
+      };
+
+      const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+      expect(result.ok).toBe(true);
+    });
+
+    it('allows whitelisted Accessibility.queryAXTree', async () => {
+      getTabUrl.mockResolvedValue('https://example.com');
+      mockDebugger.sendCommand.mockResolvedValue({ nodes: [] });
+
+      const command: RemoteCommand = {
+        id: 13,
+        method: 'Accessibility.queryAXTree',
+        tabId: 10,
+      };
+
+      const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+      expect(result.ok).toBe(true);
     });
 
     it('claims tab for remote and subsequent commands succeed', async () => {

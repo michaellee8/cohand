@@ -44,6 +44,38 @@ export function resetTabOwnership(): void {
 }
 
 /**
+ * Whitelist of allowed CDP methods for remote mode.
+ * Only safe observation and interaction methods are permitted.
+ * Runtime.evaluate and similar dangerous methods are excluded.
+ */
+const ALLOWED_CDP_METHODS = new Set([
+  // Navigation
+  'Page.navigate',
+  'Page.reload',
+  'Page.getFrameTree',
+  // DOM inspection
+  'DOM.getDocument',
+  'DOM.querySelector',
+  'DOM.querySelectorAll',
+  'DOM.getOuterHTML',
+  'DOM.getAttributes',
+  'DOM.getContentQuads',
+  'DOM.scrollIntoViewIfNeeded',
+  'DOM.describeNode',
+  'DOM.resolveNode',
+  'DOM.getBoxModel',
+  // Accessibility
+  'Accessibility.queryAXTree',
+  'Accessibility.getFullAXTree',
+  // Input (mouse/touch allowed, keyboard blocked separately)
+  'Input.dispatchMouseEvent',
+  'Input.dispatchTouchEvent',
+  // Page info
+  'Page.captureScreenshot',
+  'Page.getLayoutMetrics',
+]);
+
+/**
  * Execute a remote CDP command with domain validation.
  */
 export async function executeRemoteCommand(
@@ -82,13 +114,24 @@ export async function executeRemoteCommand(
       };
     }
 
+    // CDP method whitelist — only allow safe methods, reject everything else
+    if (!ALLOWED_CDP_METHODS.has(command.method) &&
+        !command.method.startsWith('Input.dispatchMouseEvent') &&
+        !command.method.startsWith('Input.dispatchTouchEvent')) {
+      return {
+        id: command.id,
+        ok: false,
+        error: `CDP method not allowed: ${command.method}`,
+      };
+    }
+
     // Input lock: block text input and form submission unless explicitly unlocked
-    const blockedMethods = [
+    const blockedInputMethods = [
       'Input.dispatchKeyEvent',
       'Input.insertText',
       'Input.imeSetComposition',
     ];
-    if (blockedMethods.includes(command.method)) {
+    if (blockedInputMethods.includes(command.method)) {
       return {
         id: command.id,
         ok: false,
