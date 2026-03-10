@@ -1,4 +1,5 @@
 import { generateAccessibilityTree } from '@/lib/a11y-tree';
+import { activate, deactivate } from '@/lib/recording/element-selector';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -12,6 +13,18 @@ export default defineContentScript({
         const tree = generateAccessibilityTree();
         sendResponse(tree);
         return true; // async
+      }
+
+      if (msg.type === 'ACTIVATE_RECORDING') {
+        activate();
+        sendResponse({ ok: true });
+        return true;
+      }
+
+      if (msg.type === 'DEACTIVATE_RECORDING') {
+        deactivate();
+        sendResponse({ ok: true });
+        return true;
       }
     });
   },
