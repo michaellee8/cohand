@@ -6,6 +6,9 @@ import type {
   StateSnapshot,
   TaskNotification,
   LlmUsageRecord,
+  RecordingRecord,
+  RecordingStepRecord,
+  RecordingPageSnapshot,
 } from '../types';
 import {
   MAX_RUNS_PER_TASK,
@@ -282,3 +285,79 @@ export const getLlmUsageForTask = (db: IDBDatabase, taskId: string) =>
     'by_task',
     IDBKeyRange.bound([taskId], [taskId, '\uffff']),
   );
+
+// ---------------------------------------------------------------------------
+// Recordings
+// ---------------------------------------------------------------------------
+
+export const putRecording = (db: IDBDatabase, record: RecordingRecord) =>
+  putRecord(db, 'recordings', record);
+
+export const getRecording = (db: IDBDatabase, id: string) =>
+  getRecord<RecordingRecord>(db, 'recordings', id);
+
+// ---------------------------------------------------------------------------
+// Recording Steps
+// ---------------------------------------------------------------------------
+
+export const putRecordingStep = (db: IDBDatabase, step: RecordingStepRecord) =>
+  putRecord(db, 'recording_steps', step);
+
+export async function getRecordingSteps(db: IDBDatabase, recordingId: string): Promise<RecordingStepRecord[]> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('recording_steps', 'readonly');
+    const store = tx.objectStore('recording_steps');
+    const index = store.index('by_recording');
+    const request = index.getAll(recordingId);
+    request.onsuccess = () => {
+      const steps = request.result as RecordingStepRecord[];
+      steps.sort((a, b) => a.sequenceIndex - b.sequenceIndex);
+      resolve(steps);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export const deleteRecordingStep = (db: IDBDatabase, stepId: string) =>
+  deleteRecord(db, 'recording_steps', stepId);
+
+// ---------------------------------------------------------------------------
+// Recording Page Snapshots
+// ---------------------------------------------------------------------------
+
+export const putRecordingPageSnapshot = (db: IDBDatabase, snapshot: RecordingPageSnapshot) =>
+  putRecord(db, 'recording_page_snapshots', snapshot);
+
+export const getRecordingPageSnapshots = (db: IDBDatabase, recordingId: string) =>
+  getAllByIndex<RecordingPageSnapshot>(db, 'recording_page_snapshots', 'by_recording', recordingId);
+
+// ---------------------------------------------------------------------------
+// Recording Cascade Delete
+// ---------------------------------------------------------------------------
+
+export async function deleteRecording(db: IDBDatabase, id: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['recordings', 'recording_steps', 'recording_page_snapshots'], 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+
+    // Delete the recording itself
+    tx.objectStore('recordings').delete(id);
+
+    // Delete all steps for this recording
+    const stepsIndex = tx.objectStore('recording_steps').index('by_recording');
+    const stepsReq = stepsIndex.openCursor(id);
+    stepsReq.onsuccess = () => {
+      const cursor = stepsReq.result;
+      if (cursor) { cursor.delete(); cursor.continue(); }
+    };
+
+    // Delete all snapshots for this recording
+    const snapsIndex = tx.objectStore('recording_page_snapshots').index('by_recording');
+    const snapsReq = snapsIndex.openCursor(id);
+    snapsReq.onsuccess = () => {
+      const cursor = snapsReq.result;
+      if (cursor) { cursor.delete(); cursor.continue(); }
+    };
+  });
+}

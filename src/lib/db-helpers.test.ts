@@ -25,6 +25,14 @@ import {
   isNotificationRateLimited,
   putLlmUsage,
   getLlmUsageForTask,
+  putRecording,
+  getRecording,
+  putRecordingStep,
+  getRecordingSteps,
+  deleteRecordingStep,
+  putRecordingPageSnapshot,
+  getRecordingPageSnapshots,
+  deleteRecording,
 } from './db-helpers';
 import type {
   Task,
@@ -34,6 +42,9 @@ import type {
   StateSnapshot,
   TaskNotification,
   LlmUsageRecord,
+  RecordingRecord,
+  RecordingStepRecord,
+  RecordingPageSnapshot,
 } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -464,5 +475,140 @@ describe('LLM Usage', () => {
     const results = await getLlmUsageForTask(db, 'task-1');
     expect(results).toHaveLength(2);
     expect(results.every((r) => r.taskId === 'task-1')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recording helpers
+// ---------------------------------------------------------------------------
+
+function makeRecording(overrides: Partial<RecordingRecord> = {}): RecordingRecord {
+  return {
+    id: 'rec-1',
+    startedAt: '2026-03-10T00:00:00.000Z',
+    activeTabId: 1,
+    trackedTabs: [1],
+    stepCount: 0,
+    ...overrides,
+  };
+}
+
+function makeRecordingStep(overrides: Partial<RecordingStepRecord> = {}): RecordingStepRecord {
+  return {
+    id: 'step-1',
+    recordingId: 'rec-1',
+    sequenceIndex: 0,
+    timestamp: Date.now(),
+    action: 'click',
+    ...overrides,
+  };
+}
+
+function makePageSnapshot(overrides: Partial<RecordingPageSnapshot> = {}): RecordingPageSnapshot {
+  return {
+    id: 'snap-page-1',
+    recordingId: 'rec-1',
+    snapshotKey: 'page-1',
+    url: 'https://example.com',
+    tree: { role: 'WebArea', name: 'Example' },
+    capturedAt: '2026-03-10T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('Recording helpers', () => {
+  it('putRecording + getRecording round-trip', async () => {
+    const rec = makeRecording();
+    await putRecording(db, rec);
+    const result = await getRecording(db, 'rec-1');
+    expect(result).toEqual(rec);
+  });
+
+  it('getRecording returns undefined for missing id', async () => {
+    const result = await getRecording(db, 'does-not-exist');
+    expect(result).toBeUndefined();
+  });
+
+  it('putRecordingStep + getRecordingSteps retrieves in order', async () => {
+    await putRecordingStep(db, makeRecordingStep({ id: 'step-3', sequenceIndex: 2 }));
+    await putRecordingStep(db, makeRecordingStep({ id: 'step-1', sequenceIndex: 0 }));
+    await putRecordingStep(db, makeRecordingStep({ id: 'step-2', sequenceIndex: 1 }));
+
+    const steps = await getRecordingSteps(db, 'rec-1');
+    expect(steps).toHaveLength(3);
+    expect(steps.map((s) => s.id)).toEqual(['step-1', 'step-2', 'step-3']);
+    expect(steps.map((s) => s.sequenceIndex)).toEqual([0, 1, 2]);
+  });
+
+  it('getRecordingSteps returns only steps for the given recording', async () => {
+    await putRecordingStep(db, makeRecordingStep({ id: 'step-1', recordingId: 'rec-1', sequenceIndex: 0 }));
+    await putRecordingStep(db, makeRecordingStep({ id: 'step-2', recordingId: 'rec-2', sequenceIndex: 0 }));
+
+    const steps = await getRecordingSteps(db, 'rec-1');
+    expect(steps).toHaveLength(1);
+    expect(steps[0].id).toBe('step-1');
+  });
+
+  it('deleteRecordingStep removes a specific step', async () => {
+    await putRecordingStep(db, makeRecordingStep({ id: 'step-1', sequenceIndex: 0 }));
+    await putRecordingStep(db, makeRecordingStep({ id: 'step-2', sequenceIndex: 1 }));
+
+    await deleteRecordingStep(db, 'step-1');
+
+    const steps = await getRecordingSteps(db, 'rec-1');
+    expect(steps).toHaveLength(1);
+    expect(steps[0].id).toBe('step-2');
+  });
+
+  it('putRecordingPageSnapshot + getRecordingPageSnapshots round-trip', async () => {
+    const snap1 = makePageSnapshot({ id: 'snap-1', snapshotKey: 'page-1' });
+    const snap2 = makePageSnapshot({ id: 'snap-2', snapshotKey: 'page-2', url: 'https://example.com/page2' });
+    await putRecordingPageSnapshot(db, snap1);
+    await putRecordingPageSnapshot(db, snap2);
+
+    const snapshots = await getRecordingPageSnapshots(db, 'rec-1');
+    expect(snapshots).toHaveLength(2);
+    const ids = snapshots.map((s) => s.id).sort();
+    expect(ids).toEqual(['snap-1', 'snap-2']);
+  });
+
+  it('getRecordingPageSnapshots returns only snapshots for the given recording', async () => {
+    await putRecordingPageSnapshot(db, makePageSnapshot({ id: 'snap-1', recordingId: 'rec-1' }));
+    await putRecordingPageSnapshot(db, makePageSnapshot({ id: 'snap-2', recordingId: 'rec-2' }));
+
+    const snapshots = await getRecordingPageSnapshots(db, 'rec-1');
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].id).toBe('snap-1');
+  });
+
+  it('deleteRecording cascade-deletes recording + steps + snapshots', async () => {
+    // Set up a recording with steps and snapshots
+    await putRecording(db, makeRecording({ id: 'rec-1' }));
+    await putRecordingStep(db, makeRecordingStep({ id: 'step-1', recordingId: 'rec-1', sequenceIndex: 0 }));
+    await putRecordingStep(db, makeRecordingStep({ id: 'step-2', recordingId: 'rec-1', sequenceIndex: 1 }));
+    await putRecordingPageSnapshot(db, makePageSnapshot({ id: 'snap-1', recordingId: 'rec-1' }));
+    await putRecordingPageSnapshot(db, makePageSnapshot({ id: 'snap-2', recordingId: 'rec-1' }));
+
+    // Also add data for a different recording that should NOT be deleted
+    await putRecording(db, makeRecording({ id: 'rec-2' }));
+    await putRecordingStep(db, makeRecordingStep({ id: 'step-3', recordingId: 'rec-2', sequenceIndex: 0 }));
+    await putRecordingPageSnapshot(db, makePageSnapshot({ id: 'snap-3', recordingId: 'rec-2' }));
+
+    // Delete rec-1
+    await deleteRecording(db, 'rec-1');
+
+    // rec-1 and its children should be gone
+    expect(await getRecording(db, 'rec-1')).toBeUndefined();
+    expect(await getRecordingSteps(db, 'rec-1')).toEqual([]);
+    expect(await getRecordingPageSnapshots(db, 'rec-1')).toEqual([]);
+
+    // rec-2 and its children should still exist
+    expect(await getRecording(db, 'rec-2')).toBeDefined();
+    const remainingSteps = await getRecordingSteps(db, 'rec-2');
+    expect(remainingSteps).toHaveLength(1);
+    expect(remainingSteps[0].id).toBe('step-3');
+    const remainingSnaps = await getRecordingPageSnapshots(db, 'rec-2');
+    expect(remainingSnaps).toHaveLength(1);
+    expect(remainingSnaps[0].id).toBe('snap-3');
   });
 });
