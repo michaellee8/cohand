@@ -122,13 +122,22 @@ export function buildRepairMessages(params: {
   a11yTree: string;
   schema?: string;
   lastOutput?: string;
+  recordingSteps?: unknown[];
+  recordingSnapshots?: unknown[];
 }): Array<{ role: 'system' | 'user'; content: string }> {
-  const userContent = REPAIR_PROMPT
+  let userContent = REPAIR_PROMPT
     .replace('{source}', params.source)
     .replace('{error}', params.error)
     .replace('{a11yTree}', params.a11yTree)
     .replace('{schema}', params.schema || 'Not specified')
     .replace('{lastOutput}', params.lastOutput || 'None');
+
+  if (params.recordingSteps?.length) {
+    userContent += `\n\n## Original Recording Steps\n${JSON.stringify(params.recordingSteps, null, 2)}`;
+  }
+  if (params.recordingSnapshots?.length) {
+    userContent += `\n\n## Page Snapshots from Recording\n${JSON.stringify(params.recordingSnapshots, null, 2)}`;
+  }
 
   return [
     { role: 'system', content: EXPLORER_SYSTEM_PROMPT },

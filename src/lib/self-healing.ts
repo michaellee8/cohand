@@ -11,9 +11,11 @@ export interface HealingContext {
   failedRun: ScriptRun;
   versions: ScriptVersion[];
   executeScript: (version: ScriptVersion) => Promise<ScriptRun>;
-  repairScript: (failedSource: string, error: string, a11yTree: string) => Promise<{ source: string; astValid: boolean }>;
+  repairScript: (failedSource: string, error: string, a11yTree: string, recordingSteps?: unknown[], recordingSnapshots?: unknown[]) => Promise<{ source: string; astValid: boolean }>;
   getA11yTree: () => Promise<string>;
   securityReview: (source: string, previousApproved?: string) => Promise<{ approved: boolean }>;
+  recordingSteps?: unknown[];       // RecordingStepRecord[] from IndexedDB
+  recordingSnapshots?: unknown[];   // RecordingPageSnapshot[] from IndexedDB
 }
 
 /**
@@ -66,6 +68,8 @@ export async function selfHeal(ctx: HealingContext): Promise<HealingAction> {
         activeVersion.source,
         failedRun.error || 'Unknown error',
         a11yTree,
+        ctx.recordingSteps,
+        ctx.recordingSnapshots,
       );
 
       if (!repaired.astValid) continue;

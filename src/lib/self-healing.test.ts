@@ -197,7 +197,7 @@ describe('selfHeal', () => {
       version: 4,
     });
     expect(getA11yTree).toHaveBeenCalled();
-    expect(repairScript).toHaveBeenCalledWith('v3 code', 'Selector not found', '<a11y>test</a11y>');
+    expect(repairScript).toHaveBeenCalledWith('v3 code', 'Selector not found', '<a11y>test</a11y>', undefined, undefined);
     expect(securityReview).toHaveBeenCalledWith('fixed code', 'v3 code');
   });
 
@@ -258,6 +258,36 @@ describe('selfHeal', () => {
     const result = await selfHeal(ctx);
 
     expect(result).toEqual({ type: 'failed', reason: 'No active version found for repair' });
+  });
+
+  it('passes recording context to repairScript when provided', async () => {
+    const executeScript = vi.fn().mockResolvedValue(makeRun(false));
+    const repairScript = vi.fn().mockResolvedValue({ source: 'fixed code', astValid: true });
+    const securityReview = vi.fn().mockResolvedValue({ approved: true });
+    const getA11yTree = vi.fn().mockResolvedValue('<a11y>tree</a11y>');
+
+    const recordingSteps = [{ action: 'click', selector: '#btn' }];
+    const recordingSnapshots = [{ url: 'https://example.com', a11yTree: '<snapshot/>' }];
+
+    const ctx = makeContext({
+      executeScript,
+      repairScript,
+      securityReview,
+      getA11yTree,
+      recordingSteps,
+      recordingSnapshots,
+    });
+
+    const result = await selfHeal(ctx);
+
+    expect(result.type).toBe('repair_generated');
+    expect(repairScript).toHaveBeenCalledWith(
+      'v3 code',
+      'Selector not found',
+      '<a11y>tree</a11y>',
+      recordingSteps,
+      recordingSnapshots,
+    );
   });
 
   it('limits previous version fallbacks to 2', async () => {
