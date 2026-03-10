@@ -40,10 +40,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         getDomainPermissions(),
         getEncryptedTokens(),
       ]);
+      const codexOAuth = (await chrome.storage.local.get('codexOAuthTokens')).codexOAuthTokens;
       set({
         settings,
         domainPermissions: permissions,
-        hasApiKey: !!(tokens.apiKey || tokens.oauthToken),
+        hasApiKey: !!(tokens.apiKey || tokens.oauthToken || codexOAuth?.access),
         loading: false,
       });
     } catch (err: any) {

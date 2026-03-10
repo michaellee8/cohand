@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { LLMClient, createSecurityReviewClients } from '../../../lib/llm-client';
+import { resolveModel, getSecurityReviewModels } from '../../../lib/pi-ai-bridge';
 import { generateScript, type ExplorationResult } from '../../../lib/explorer';
 import { securityReview } from '../../../lib/security/security-review';
 import { validateAST } from '../../../lib/security/ast-validator';
@@ -37,9 +37,9 @@ interface WizardState {
 const STEPS: WizardStep[] = ['describe', 'domains', 'observe', 'review', 'test', 'schedule'];
 
 /**
- * Initialize an LLM client from stored settings and encrypted token.
+ * Initialize a pi-ai model and API key from stored settings and encrypted token.
  */
-async function initLLMClient(): Promise<LLMClient> {
+async function initLLM(): Promise<{ model: any; apiKey: string }> {
   const settings = await getSettings();
   const tokens = await getEncryptedTokens();
 
@@ -56,7 +56,7 @@ async function initLLMClient(): Promise<LLMClient> {
     throw new Error('No API key configured. Go to Settings to add one.');
   }
 
-  return new LLMClient(settings, token);
+  return { model: resolveModel(settings), apiKey: token };
 }
 
 export const useWizardStore = create<WizardState>((set, get) => ({
@@ -128,12 +128,13 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         title: tab.title || '',
       };
 
-      // Step 2: Initialize LLM client (side panel makes all LLM calls)
-      const client = await initLLMClient();
+      // Step 2: Initialize LLM model (side panel makes all LLM calls)
+      const { model, apiKey } = await initLLM();
 
       // Step 3: Generate script via LLM
       const genResult = await generateScript(
-        client,
+        model,
+        apiKey,
         get().description,
         observation,
         get().domains,
@@ -147,21 +148,10 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       if (astResult.valid) {
         try {
           const settings = await getSettings();
-          const tokens = await getEncryptedTokens();
-          let token = '';
-          const keyEncoded = await getEncryptionKeyEncoded();
-          if (keyEncoded && tokens.apiKey) {
-            const key = await importKey(keyEncoded);
-            token = await decrypt(key, tokens.apiKey);
-          } else if (tokens.apiKey) {
-            token = tokens.apiKey;
-          }
-
-          if (token) {
-            const reviewClients = createSecurityReviewClients(settings, token);
-            const reviewResult = await securityReview(genResult.source, reviewClients);
-            secPassed = reviewResult.approved;
-          }
+          const reviewModels = getSecurityReviewModels(settings);
+          const { apiKey: reviewApiKey } = await initLLM();
+          const reviewResult = await securityReview(genResult.source, reviewModels, reviewApiKey);
+          secPassed = reviewResult.approved;
         } catch (err) {
           console.warn('[Cohand] Security review failed, marking as not passed:', err);
         }

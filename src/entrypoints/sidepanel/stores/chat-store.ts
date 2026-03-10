@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { LLMClient, type ChatMessage as LLMChatMessage } from '../../../lib/llm-client';
+import { stream as piStream } from '@mariozechner/pi-ai';
+import { resolveModel } from '../../../lib/pi-ai-bridge';
 import { getSettings, getEncryptedTokens, getEncryptionKeyEncoded } from '../../../lib/storage';
 import { decrypt, importKey } from '../../../lib/crypto';
 
@@ -15,7 +16,8 @@ interface ChatState {
   messages: ChatMessage[];
   isStreaming: boolean;
   error: string | null;
-  client: LLMClient | null;
+  model: any | null;
+  apiKey: string | null;
   abortController: AbortController | null;
 
   initClient: () => Promise<void>;
@@ -33,7 +35,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   }],
   isStreaming: false,
   error: null,
-  client: null,
+  model: null,
+  apiKey: null,
   abortController: null,
 
   initClient: async () => {
@@ -57,17 +60,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
 
-      const client = new LLMClient(settings, token);
-      set({ client, error: null });
+      const model = resolveModel(settings);
+      set({ model, apiKey: token, error: null });
     } catch (err: any) {
       set({ error: `Failed to initialize LLM: ${err.message}` });
     }
   },
 
   sendMessage: async (content: string) => {
-    const { client, messages } = get();
-    if (!client) {
-      set({ error: 'LLM client not initialized' });
+    const { model, apiKey, messages } = get();
+    if (!model || !apiKey) {
+      set({ error: 'LLM not initialized' });
       return;
     }
 
@@ -96,22 +99,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ abortController });
 
     try {
-      const llmMessages: LLMChatMessage[] = [
-        ...get().messages
+      // Build pi-ai context from messages
+      const context = {
+        systemPrompt: '',
+        messages: get().messages
           .filter(m => m.id !== assistantMessage.id && m.id !== 'welcome')
-          .map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
-      ];
+          .map(m => ({
+            role: m.role as 'user' | 'assistant',
+            content: [{ type: 'text' as const, text: m.content }],
+            timestamp: m.timestamp,
+          })),
+      };
 
       let fullContent = '';
-      for await (const chunk of client.stream(llmMessages, { signal: abortController.signal })) {
-        fullContent += chunk;
-        set(state => ({
-          messages: state.messages.map(m =>
-            m.id === assistantMessage.id
-              ? { ...m, content: fullContent }
-              : m
-          ),
-        }));
+      const result = piStream(model, context as any, { apiKey, signal: abortController.signal, transport: 'sse' });
+      for await (const event of result) {
+        if (event.type === 'text_delta') {
+          fullContent += event.delta;
+          set(state => ({
+            messages: state.messages.map(m =>
+              m.id === assistantMessage.id
+                ? { ...m, content: fullContent }
+                : m
+            ),
+          }));
+        }
       }
 
       // Mark streaming complete
