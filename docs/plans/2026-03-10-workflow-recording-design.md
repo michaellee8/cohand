@@ -6,7 +6,7 @@ Workflow Recording is a demonstration-based task creation flow for non-technical
 
 The recording is **teaching material**, not a script template. The LLM may produce a script that looks nothing like the literal recording — adding state management, loops, conditionals, error handling — based on the user's intent expressed through demonstration + refinement instructions.
 
-This design also fixes the currently non-functional "ChatGPT Subscription" provider to use real OpenAI Codex OAuth and the Codex Responses API (`chatgpt.com/backend-api/codex/responses`).
+This design also fixes the currently non-functional "ChatGPT Subscription" provider to use real OpenAI Codex OAuth, and replaces the existing `LLMClient` (OpenAI SDK wrapper) with [`@mariozechner/pi-ai`](https://github.com/badlogic/pi-mono/tree/main/packages/ai) — a unified LLM library with built-in support for the Codex Responses API, 20+ providers, streaming, tool calling, cross-provider handoffs, and token/cost tracking.
 
 ### Core Flow
 
@@ -54,6 +54,18 @@ Per click, the overlay captures:
 - Target element info (selector, name, placeholder, aria-label)
 - `isPending` flag while typing, `isFinal` when focus leaves field
 - Sent as `KEYSTROKE_UPDATE` messages
+
+### Sensitive Input Redaction
+
+Keystrokes on sensitive fields are **never captured or sent** to the service worker. The content script checks each keystroke target and suppresses capture for:
+
+- `input[type="password"]`
+- Elements with `autocomplete` containing `cc-number`, `cc-csc`, `cc-exp`, `new-password`, `current-password`, `one-time-code`
+- Elements whose `name` or `id` matches patterns: `password`, `passwd`, `pin`, `cvv`, `cvc`, `ssn`, `otp`, `mfa`, `totp`, `secret`, `token`
+
+For these fields, the recording step captures only the element selector and a placeholder description ("Typed in password field" / "Entered sensitive data") — no actual `typedText`. This applies to both keystroke events and the final `type` action persisted in IndexedDB.
+
+Note: Claude's Chrome extension ("Teach Claude") does NOT filter sensitive inputs — it captures all field values uniformly and relies on a privacy warning. Cohand takes a stricter approach because recorded steps are persisted to IndexedDB and sent to LLM prompts, increasing the blast radius of accidental credential capture.
 
 ### Navigation Capture
 
@@ -114,13 +126,19 @@ interface RecordingSession {
   completedAt?: string
   activeTabId: number
   trackedTabs: number[]         // plain array, not Set (serialization-safe)
-  pageSnapshots: Record<string, A11yNode>  // keyed by URL, max 20 URLs, max 50KB per tree
+  pageSnapshots: Record<string, A11yNode>  // keyed by snapshotKey, max 20, max 50KB per tree
   steps: RecordingStep[]
   generatedTaskId?: string      // set after script generation
 }
-// Constraints: pageSnapshots capped at 20 unique URLs. A11y trees truncated to 5 levels
+// Constraints: pageSnapshots capped at 20 entries. A11y trees truncated to 5 levels
 // depth and 50KB max per snapshot. Snapshots persisted to IndexedDB as captured (not
 // just in-memory) via a recording_page_snapshots store to survive sidepanel crashes.
+//
+// Snapshot keying: `${url}#${snapshotIndex}` — a new snapshot is captured not only on
+// URL change, but also when the user performs an action and the page's a11y tree root
+// hash differs significantly from the last snapshot (>30% node-count change heuristic).
+// This handles SPAs where modals, tab switches, and inline state changes alter the DOM
+// without changing the URL. The 20-entry cap and 50KB limit still apply.
 ```
 
 ### Zustand Store (recording-store.ts)
@@ -136,7 +154,7 @@ interface RecordingState {
   startRecording: (tabId: number) => void
   stopRecording: () => void
   togglePause: () => void
-  removeStep: (stepId: string) => void
+  removeStep: (stepId: string) => void    // deletes from IndexedDB recording_steps store
   appendStep: (step: RecordingStep) => void
   updateStepDescription: (stepId: string, description: string) => void
 }
@@ -146,7 +164,7 @@ interface RecordingState {
 
 Long-lived port (`chrome.runtime.connect({ name: 'recording-stream' })`) from sidepanel to service worker when recording starts. Port name `'recording-stream'` is distinct from existing `'script-rpc'` port. Service worker acknowledges content script events immediately via `sendResponse({ ok: true })`, enriches asynchronously (screenshot via `captureVisibleTab()`), and forwards enriched steps via the port.
 
-If the port disconnects (sidepanel crash/close), steps are buffered in `chrome.storage.session` with the session ID and `bufferedAt` timestamp. On reconnect, buffered steps are drained. On service worker restart, orphaned buffers (no matching active session) are discarded with a user notification: "Recording was interrupted."
+If the port disconnects (sidepanel crash/close), steps are buffered in `chrome.storage.session` with the session ID and `bufferedAt` timestamp. **Screenshots are stripped before buffering** to stay within `chrome.storage.session`'s 10 MB quota (a single screenshot can be 200-500 KB base64). On reconnect, buffered steps are drained. On service worker restart, orphaned buffers (no matching active session) are discarded with a user notification: "Recording was interrupted."
 
 ```
 Content script
@@ -185,6 +203,14 @@ type RecordingPortMessage =
 // These are added to the existing Message union in messages.ts alongside
 // ContentScriptEvent types. The service worker router uses sender.tab to
 // distinguish content script events from sidepanel commands.
+
+// OAuth callback page → Service worker
+// oauth-callback.html parses code + state from location.search on load,
+// then sends this message. The handler in background.ts retrieves the stored
+// PKCE verifier from chrome.storage.local and performs token exchange.
+// This works even after service worker restart (message listener re-registered on startup).
+type OAuthMessage =
+  | { type: 'OAUTH_CALLBACK'; code: string; state: string }
 ```
 
 ### IndexedDB Schema
@@ -225,18 +251,22 @@ interface RecordingStepRecord {
   description?: string
   // screenshot intentionally omitted — stripped before persist
 }
+// Step deletion: removeStep() physically deletes the record from recording_steps.
+// Self-healing and script generation query only existing records — deleted steps
+// are never seen. The recordings store's stepCount is decremented on delete.
 
-// recording_page_snapshots store — indexed by [recordingId, url]
+// recording_page_snapshots store — indexed by [recordingId, snapshotKey]
 interface RecordingPageSnapshot {
   id: string
   recordingId: string
+  snapshotKey: string        // `${url}#${snapshotIndex}` — re-captured on significant DOM changes
   url: string
   tree: unknown              // A11yNode, serialized, max 50KB
   capturedAt: string         // ISO-8601
 }
 ```
 
-**DB version bump:** Adding these stores requires incrementing `DB_VERSION` from 1 to 2 with an `onupgradeneeded` handler that creates the new stores only if upgrading from v1.
+**DB version bump:** Increment `DB_VERSION` from 1 to 2. In the `onupgradeneeded` handler, use `if (old < 2)` (not `old === 1`) to create the new stores. For a fresh install (`old === 0`), both the `old < 1` and `old < 2` blocks run in sequence — this is the standard IndexedDB migration pattern.
 
 ## 4. Voice Narration
 
@@ -246,8 +276,8 @@ Speech-to-text runs in the sidepanel via the Web Speech API (`SpeechRecognition`
 
 - When recording starts with voice enabled, `SpeechRecognition` initialized with `continuous: true` and `interimResults: true`
 - Interim transcripts shown in recording UI as live subtitle
-- Final transcripts attached to the most recent step's `speechTranscript` field
-- If user speaks without performing an action, a standalone `narration` step is created with `description: 'Note: "..."'`
+- Final transcripts are associated by **timestamp overlap**: the speech segment's start time is compared against action step timestamps, and the transcript is attached to the step whose timestamp is closest to (and not after) the speech start. If no action step falls within a 3-second window before the speech start, a standalone `narration` step is created instead
+- If user speaks without performing any action at all, a standalone `narration` step is created with `description: 'Note: "..."'`
 - `sequenceIndex` for narration steps uses speech start time (not end time) to maintain correct ordering relative to action steps, since speech recognition `final` events can fire with 0.5-2s delay
 
 ### Permission Flow
@@ -369,15 +399,18 @@ interface StorageLocal {
   codexOAuthTokens?: EncryptedCodexOAuth
 }
 
+// Storage format — encrypted at rest, NOT the same shape as pi-ai's OAuthCredentials
 interface EncryptedCodexOAuth {
-  accessToken: string      // encrypted with AES-GCM
-  refreshToken: string     // encrypted with AES-GCM
-  expiresAt: number        // milliseconds timestamp (plaintext, not sensitive)
+  access: string           // encrypted with AES-GCM (field name matches pi-ai)
+  refresh: string          // encrypted with AES-GCM (field name matches pi-ai)
+  expires: number          // milliseconds timestamp (plaintext, not sensitive)
   accountId: string        // plaintext, needed for API headers
 }
 ```
 
-The existing `settings-store.ts` `hasApiKey` check is updated: `hasApiKey: !!(tokens.apiKey || tokens.oauthToken || codexOAuth?.accessToken)`.
+**Decrypt/map layer (in `pi-ai-bridge.ts`):** Before any pi-ai call, `getCodexApiKey()` decrypts `access` and `refresh` from storage, producing a plaintext `OAuthCredentials` object (`{ access, refresh, expires, accountId }`) that matches pi-ai's expected format. The `accountId` field uses the `[key: string]: unknown` slot in `OAuthCredentials`. Callers never pass the encrypted storage struct directly to pi-ai.
+
+The existing `settings-store.ts` `hasApiKey` check is updated: `hasApiKey: !!(tokens.apiKey || tokens.oauthToken || codexOAuth?.access)`.
 
 ### Token Refresh
 
@@ -394,54 +427,194 @@ client_id=app_EMoamEEZ73f0CkXaXp7hrann
 
 ### Codex Responses API
 
-Replace `api.openai.com/v1/chat/completions` with:
+The wire format is handled entirely by pi-ai's built-in `openai-codex-responses` provider (`streamOpenAICodexResponses`). Cohand does NOT implement the Codex API client directly. For reference, the endpoint and format:
 
 ```
 POST https://chatgpt.com/backend-api/codex/responses
-Headers:
-  Authorization: Bearer {jwt_access_token}
-  chatgpt-account-id: {account_id}
-  OpenAI-Beta: responses=experimental
-  Content-Type: application/json
-
-Body:
-{
-  "model": "gpt-5.4",
-  "stream": true,
-  "instructions": "system prompt",
-  "input": [
-    { "role": "user", "content": "..." },
-    { "role": "assistant", "content": "..." }
-  ],
-  "tools": [],
-  "reasoning": { "effort": "medium" },
-  "store": false
-}
+Headers: Authorization, chatgpt-account-id, OpenAI-Beta: responses=experimental
+Body: { model, stream, instructions, input[], tools[], reasoning: { effort } }
+Response: SSE stream (response.created, response.done, response.completed, response.failed)
 ```
 
-Response: SSE stream with events `response.created`, `response.done`, `response.completed`, `response.failed`, `error`.
+pi-ai handles: SSE + WebSocket dual transport, session-based connection caching (5-min TTL), 3-attempt retry with exponential backoff, reasoning effort mapping per model, usage limit detection with reset time calculation, and `chatgpt-account-id` extraction from the JWT token.
 
-**Error handling:**
-- `response.failed`: Surface error to user, do not retry automatically (may be a content policy rejection)
-- HTTP 429 (rate limit): Parse `Retry-After` header, show "Usage limit reached ({plan_type} plan). Try again in ~{mins} minutes."
-- HTTP 500/502/503/504: Retry once with 2-second backoff, then surface error
-- SSE idle timeout: If no bytes received for 30 seconds, abort stream and surface timeout error
-- Usage tracking: Parse `usage` field from `response.completed` event to populate `llm_usage` IndexedDB store. If field format differs from OpenAI SDK, map accordingly.
+**Cohand-specific error surfacing** (on top of pi-ai's error handling):
+- `response.failed` / `stopReason === 'error'`: Surface `errorMessage` to user via chat UI
+- HTTP 429 (rate limit): pi-ai retries with backoff; if exhausted, show "Usage limit reached. Try again in ~{mins} minutes."
+- `stopReason === 'length'`: Show "Response was cut short due to length limits"
+- Usage tracking: `AssistantMessage.usage` → `recordLlmUsage()` after every call
 
-### LLM Client Architecture
+### LLM Client Architecture — Adopting `@mariozechner/pi-ai`
 
-Define a common `ILLMClient` interface that both clients implement:
+Replace the existing `LLMClient` (OpenAI SDK wrapper) with [`@mariozechner/pi-ai`](https://github.com/badlogic/pi-mono/tree/main/packages/ai), a unified LLM library with built-in support for 20+ providers including the Codex Responses API. This eliminates the need for a custom `ILLMClient` interface or separate `CodexResponsesClient`.
+
+**Why pi-ai instead of custom clients:**
+
+- Already implements `openai-codex-responses` provider with SSE + WebSocket transport, session caching, reasoning effort, retry logic, and usage limit handling
+- Handles cross-provider message transformation (thinking blocks, tool call ID normalization, orphaned tool call injection)
+- Typed `Context` object serializes to JSON for persistence and cross-provider handoffs
+- TypeBox-based tool schemas with AJV validation
+- Token/cost tracking built into every `AssistantMessage.usage`
+- Eliminates direct OpenAI SDK dependency for LLM calls
+
+**Core API surface used by cohand:**
 
 ```typescript
-interface ILLMClient {
-  chat(messages: ChatMessage[], opts?: LLMCallOptions): Promise<string>
-  stream(messages: ChatMessage[], opts?: LLMCallOptions): AsyncGenerator<string>
+import {
+  getModel, stream, complete, streamSimple, completeSimple,
+  type Model, type Context, type AssistantMessage, type Tool,
+  Type, StringEnum,
+} from '@mariozechner/pi-ai';
+
+// Provider → pi-ai model resolution
+// getModel() returns undefined for unknown model IDs, so all branches use
+// getModelSafe() which falls back to constructing a custom Model object.
+function resolveModel(settings: Settings, overrideModel?: string): Model<Api> {
+  const modelId = overrideModel ?? settings.llmModel;
+  switch (settings.llmProvider) {
+    case 'openai':
+      return getModelSafe('openai', 'openai-responses', modelId);
+    case 'chatgpt-subscription':
+      return getModelSafe('openai-codex', 'openai-codex-responses', overrideModel ?? 'gpt-5.4');
+    case 'anthropic':
+      return getModelSafe('anthropic', 'anthropic-messages', modelId);
+    case 'gemini':
+      return getModelSafe('google', 'google-generative-ai', modelId);
+    case 'custom':
+      return buildCustomModel(settings);
+  }
+}
+
+// Try pi-ai registry first; if model ID is unknown (user-entered free-form text),
+// fall back to an inline Model object with sensible defaults for the provider's API.
+function getModelSafe(provider: string, api: Api, modelId: string): Model<Api> {
+  const registered = getModel(provider as any, modelId as any);
+  if (registered) return registered;
+  return {
+    id: modelId, name: modelId, api, provider,
+    baseUrl: getDefaultBaseUrl(provider),
+    reasoning: false, input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000, maxTokens: 16384,
+  } as Model<Api>;
+}
+
+function buildCustomModel(settings: Settings): Model<'openai-completions'> {
+  return {
+    id: settings.llmModel, name: settings.llmModel,
+    api: 'openai-completions', provider: 'custom',
+    baseUrl: settings.llmBaseUrl!,
+    reasoning: false, input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000, maxTokens: 16384,
+  } satisfies Model<'openai-completions'>;
 }
 ```
 
-`LLMClient` (existing, wraps OpenAI SDK) and `CodexResponsesClient` (new, direct fetch + SSE) both implement `ILLMClient`. The `CodexResponsesClient` maps `input`/`instructions` format internally. `createSecurityReviewClients()` returns `[ILLMClient, ILLMClient]`. All callers (`wizard-store.ts`, `chat-store.ts`, `self-healing.ts`) reference `ILLMClient`.
+**Caller migration (all callers switch to pi-ai's `Context` + `stream`/`complete`):**
 
-**Provider routing:** Only `chatgpt-subscription` uses `CodexResponsesClient`. All other providers (OpenAI API, Anthropic, Gemini, custom) continue using `LLMClient` with standard `chat.completions.create()`.
+| Caller | Before | After |
+|--------|--------|-------|
+| `chat-store.ts` | `client.stream(messages, { signal })` | `stream(model, context, { signal, apiKey })` |
+| `wizard-store.ts` | `client.chat(messages, { jsonMode })` | `complete(model, context, { apiKey })` |
+| `explorer.ts` | `client.chat(messages)` | `complete(model, context, { apiKey })` |
+| `security-review.ts` | `createSecurityReviewClients()` → two `LLMClient` | Two `Model` objects + `complete()` calls |
+| `self-healing.ts` | `ctx.repairScript(client, ...)` | `ctx.repairScript(model, apiKey, ...)` |
+
+**Dual-model security review with pi-ai:**
+
+```typescript
+function getSecurityReviewModels(settings: Settings): [Model<Api>, Model<Api>] {
+  if (settings.llmProvider === 'chatgpt-subscription') {
+    return [
+      getModel('openai-codex', 'gpt-5.4'),       // data flow analysis
+      getModel('openai-codex', 'gpt-5.3-codex'),  // capability analysis
+    ];
+  }
+  // API key mode: same model, two independent calls
+  const model = resolveModel(settings);
+  return [model, model];
+}
+```
+
+**API key resolution:** In browser, pi-ai requires explicit `apiKey` in call options (no env vars). Cohand decrypts the stored token and passes it per-call. For `chatgpt-subscription`, the OAuth access token is passed as `apiKey`, and pi-ai's Codex provider handles the `chatgpt-account-id` header internally (extracted from JWT).
+
+**Browser compatibility notes:**
+
+- Amazon Bedrock not available in browser (acceptable — not a cohand target)
+- Tool argument validation (AJV) disabled under CSP restrictions — cohand validates at the application layer
+- OAuth login flows use the Chrome-specific `declarativeNetRequest` approach (section above), NOT pi-ai's Node.js `loginOpenAICodex`. Do NOT import `@mariozechner/pi-ai/oauth` — it triggers Node.js module loads at import time (see Token Refresh section above)
+- OAuth credentials stored encrypted in `chrome.storage.local` with pi-ai-compatible field names (`access`, `refresh`, `expires`), decrypted into `OAuthCredentials` shape on demand in `pi-ai-bridge.ts`
+- **Transport: SSE only** — all Codex API calls must set `transport: 'sse'` in stream options. Browser `WebSocket` constructor ignores custom `headers` (Node.js-only feature of the `ws` library), so pi-ai's WebSocket transport path would connect without auth headers and fail with 401. Explicitly setting `transport: 'sse'` prevents this
+- **ESM/Vitest config** — pi-ai is ESM-only (`"type": "module"`). WXT/Vite handles this for the extension build, but Vitest tests need `@mariozechner/pi-ai` added to `ssr.noExternal` in `vitest.config.ts` to avoid `ERR_REQUIRE_ESM`
+
+**Token refresh — direct `fetch`, no pi-ai/oauth barrel import:**
+
+**Important:** Do NOT import from `@mariozechner/pi-ai/oauth` in extension code. The barrel `index.ts` registers all OAuth providers at module load time, including `openai-codex.ts` which conditionally imports `node:crypto` and `node:http`. Whether the guard (`process.versions?.node`) fires depends on WXT's build shims — if it does, the dynamic imports will throw in a service worker. Instead, implement token refresh directly using `fetch`:
+
+```typescript
+// In pi-ai-bridge.ts — browser-safe token refresh (no pi-ai/oauth import)
+async function refreshCodexToken(refreshToken: string): Promise<OAuthCredentials> {
+  const response = await fetch('https://auth.openai.com/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: 'app_EMoamEEZ73f0CkXaXp7hrann',
+    }),
+  });
+  if (!response.ok) throw new Error('Failed to refresh Codex OAuth token');
+  const json = await response.json();
+  const accountId = extractAccountId(json.access_token);  // JWT parse
+  return {
+    access: json.access_token,
+    refresh: json.refresh_token,
+    expires: Date.now() + json.expires_in * 1000,
+    accountId,
+  };
+}
+
+// Wrapped with refresh mutex
+let refreshPromise: Promise<OAuthCredentials> | null = null;
+
+async function getCodexApiKey(): Promise<string> {
+  const stored = await loadAndDecryptCodexOAuth();  // decrypt from chrome.storage.local
+  if (!stored) throw new Error('Not logged in to ChatGPT');
+  if (Date.now() < stored.expires) return stored.access;
+
+  // Mutex: single in-flight refresh
+  if (!refreshPromise) {
+    refreshPromise = refreshCodexToken(stored.refresh).finally(() => { refreshPromise = null; });
+  }
+  const refreshed = await refreshPromise;
+  await encryptAndSaveCodexOAuth(refreshed);
+  return refreshed.access;
+}
+```
+
+This is functionally identical to pi-ai's `refreshOpenAICodexToken` (which is just a `fetch` POST) but avoids the module-load side effects of the OAuth barrel.
+
+**Usage tracking integration:** pi-ai's `AssistantMessage.usage` maps directly to cohand's `LlmUsageRecord`:
+
+```typescript
+function mapUsage(msg: AssistantMessage, taskId: string, purpose: string): LlmUsageRecord {
+  return {
+    id: crypto.randomUUID(),
+    taskId,
+    purpose,
+    provider: msg.provider,
+    model: msg.model,
+    inputTokens: msg.usage.input,
+    outputTokens: msg.usage.output,
+    cachedTokens: msg.usage.cacheRead,
+    costUsd: msg.usage.cost.total,
+    createdAt: new Date().toISOString(),
+  };
+}
+```
+
+**Dependencies change:** Remove direct `openai@^6.27.0` dependency, add `@mariozechner/pi-ai` (includes `@sinclair/typebox` re-export). Note: `openai` remains in the bundle as a transitive dependency of pi-ai — this is fine, as it already bundles successfully in the extension via WXT/Vite today.
 
 ### Manifest Additions
 
@@ -456,7 +629,7 @@ interface ILLMClient {
 }
 ```
 
-`oauth-callback.html` must be declared as a `web_accessible_resource` so the `declarativeNetRequest` redirect can navigate to it from a `localhost` origin. WXT must build it as a page entrypoint (not content script).
+Note: `web_accessible_resources` is technically not required for `declarativeNetRequest` `main_frame` redirects — Chrome navigates to `chrome-extension://` URLs directly, bypassing the WAR check. The entry is included defensively but the `matches` field is functionally inert. The important part is that WXT must build `oauth-callback.html` as a **page entrypoint**: `src/entrypoints/oauth-callback/index.html` (template) + `src/entrypoints/oauth-callback/main.ts` (script that parses `location.search` and sends `OAUTH_CALLBACK` message to the service worker).
 
 ## 6. Refinement Chat & Script Generation
 
@@ -538,6 +711,7 @@ Data the script reads from the page goes through the injection scanner before be
 
 ### Recording-Specific Security
 
+- **Sensitive input redaction** — password fields, MFA codes, payment inputs, and other credential fields are never captured (see §2 Sensitive Input Redaction). Only the element selector and a placeholder description are recorded
 - Screenshots stripped before IndexedDB persistence (no accidental storage of sensitive page content)
 - Voice transcripts stored only in the recording session, not in the final task
 - Content script element selector overlay removed when recording stops — no persistent page modification
@@ -601,7 +775,7 @@ Data the script reads from the page goes through the injection scanner before be
 - `src/lib/recording/step-capture.ts` — step enrichment (screenshots, a11y)
 - `src/lib/recording/speech.ts` — Web Speech API wrapper
 - `src/lib/codex-oauth.ts` — PKCE flow + declarativeNetRequest rule management
-- `src/lib/codex-responses.ts` — Codex Responses API client (SSE streaming)
+- `src/lib/pi-ai-bridge.ts` — `resolveModel()`, `getSecurityReviewModels()`, `mapUsage()`, token refresh wrapper with mutex
 - `src/entrypoints/sidepanel/stores/recording-store.ts` — zustand recording state
 - `src/entrypoints/oauth-callback.html` + `oauth-callback.js` — redirect landing page
 - `src/types/recording.ts` — RecordingStep, RecordingSession, RawRecordingAction types
@@ -612,16 +786,28 @@ Data the script reads from the page goes through the injection scanner before be
 - `src/entrypoints/background.ts` — recording message routing, screenshot capture, OAuth handlers, adaptive rule lifecycle
 - `src/entrypoints/sidepanel/pages/ChatPage.tsx` — recording toolbar, live step list, refinement chat
 - `src/entrypoints/sidepanel/pages/SettingsPage.tsx` — OAuth login button, connected state
-- `src/entrypoints/sidepanel/stores/chat-store.ts` — recording-to-chat transition
-- `src/lib/llm-client.ts` — extract `ILLMClient` interface, add `CodexResponsesClient`
+- `src/entrypoints/sidepanel/stores/chat-store.ts` — recording-to-chat transition, migrate from `LLMClient.stream()` to pi-ai `stream(model, context)`
+- `src/entrypoints/sidepanel/stores/wizard-store.ts` — migrate from `LLMClient.chat()` to pi-ai `complete(model, context)`
+- `src/lib/llm-client.ts` — **delete** (replaced by `pi-ai-bridge.ts` + direct pi-ai calls)
+- `src/lib/explorer.ts` — migrate to pi-ai `complete()`, update `ChatMessage` → pi-ai `Context`
+- `src/lib/security/security-review.ts` — migrate dual-model review to `getSecurityReviewModels()` + pi-ai `complete()`
+- `src/lib/self-healing.ts` — load recording context for `generatedBy === 'recording'` scripts, migrate to pi-ai
 - `src/lib/db.ts` — add `recordings`, `recording_steps`, `recording_page_snapshots` stores; bump `DB_VERSION` to 2
 - `src/lib/messages.ts` — add `ContentScriptEvent` union, `START_RECORDING`/`STOP_RECORDING`, OAuth messages
 - `src/types/storage.ts` — add `codexOAuthTokens?: EncryptedCodexOAuth` to `StorageLocal`
 - `src/types/script.ts` — add `'recording'` to `generatedBy` union, add `recordingId?: string`
-- `src/lib/self-healing.ts` — load recording context for `generatedBy === 'recording'` scripts
 - `src/constants.ts` — bump `DB_VERSION` to 2
-- `wxt.config.ts` — add `declarativeNetRequest` + `webNavigation` permissions, `oauth-callback.html` as web-accessible resource
+- `wxt.config.ts` — add `declarativeNetRequest` + `webNavigation` permissions, `oauth-callback` page entrypoint
+- `vitest.config.ts` — add `@mariozechner/pi-ai` to `ssr.noExternal`
+- `package.json` — add `@mariozechner/pi-ai`, remove direct `openai`
 
 ### Dependencies
 
-No new npm dependencies — Web Speech API, declarativeNetRequest, crypto.subtle are all browser-native.
+- **Add:** `@mariozechner/pi-ai` — unified LLM library (includes TypeBox, handles all provider APIs)
+- **Remove (direct):** `openai@^6.27.0` — becomes a transitive dep via pi-ai (already bundles fine in MV3)
+- **No change:** Web Speech API, declarativeNetRequest, crypto.subtle remain browser-native
+
+### Build Configuration
+
+- `vitest.config.ts` — add `@mariozechner/pi-ai` to `ssr.noExternal` (ESM-only package, prevents `ERR_REQUIRE_ESM` in tests)
+- `wxt.config.ts` — add `declarativeNetRequest` + `webNavigation` permissions, `oauth-callback` page entrypoint
