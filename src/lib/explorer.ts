@@ -1,4 +1,5 @@
-import { LLMClient } from './llm-client';
+import { complete } from '@mariozechner/pi-ai';
+import type { Context, Message, UserMessage, AssistantMessage } from '@mariozechner/pi-ai';
 import { validateAST } from './security/ast-validator';
 import { buildGenerationMessages, buildRepairMessages } from './explorer-prompts';
 
@@ -13,6 +14,40 @@ export interface ScriptGenerationResult {
   source: string;
   astValid: boolean;
   astErrors: string[];
+}
+
+/**
+ * Convert the messages array from buildGenerationMessages / buildRepairMessages
+ * into a pi-ai Context object (systemPrompt + messages).
+ */
+function toContext(
+  rawMessages: Array<{ role: string; content: string | Array<{ type: string; [key: string]: any }> }>,
+): Context {
+  let systemPrompt: string | undefined;
+  const messages: Message[] = [];
+
+  for (const msg of rawMessages) {
+    if (msg.role === 'system') {
+      systemPrompt = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+    } else if (msg.role === 'user') {
+      const content = typeof msg.content === 'string'
+        ? msg.content
+        : JSON.stringify(msg.content);
+      messages.push({ role: 'user', content, timestamp: Date.now() } as UserMessage);
+    }
+  }
+
+  return { systemPrompt, messages };
+}
+
+/**
+ * Extract the text content from a pi-ai AssistantMessage.
+ */
+function extractText(result: AssistantMessage): string {
+  const textParts = result.content
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map((part) => part.text);
+  return textParts.join('');
 }
 
 /**
@@ -44,7 +79,8 @@ export async function observePage(tabId: number): Promise<ExplorationResult> {
  * Generate an automation script from a natural language description.
  */
 export async function generateScript(
-  client: LLMClient,
+  model: any,
+  apiKey: string,
   description: string,
   observation: ExplorationResult,
   domains: string[],
@@ -57,10 +93,11 @@ export async function generateScript(
     screenshot: observation.screenshot,
   });
 
-  const response = await client.chat(messages as any);
+  const context = toContext(messages);
+  const result = await complete(model, context, { apiKey });
 
   // Clean up response — strip markdown code fences if present
-  const source = cleanScriptSource(response);
+  const source = cleanScriptSource(extractText(result));
 
   // Validate AST
   const validation = validateAST(source);
@@ -76,7 +113,8 @@ export async function generateScript(
  * Generate a repair for a failing script.
  */
 export async function repairScript(
-  client: LLMClient,
+  model: any,
+  apiKey: string,
   params: {
     source: string;
     error: string;
@@ -86,8 +124,9 @@ export async function repairScript(
   },
 ): Promise<ScriptGenerationResult> {
   const messages = buildRepairMessages(params);
-  const response = await client.chat(messages);
-  const source = cleanScriptSource(response);
+  const context = toContext(messages);
+  const result = await complete(model, context, { apiKey });
+  const source = cleanScriptSource(extractText(result));
   const validation = validateAST(source);
 
   return {
