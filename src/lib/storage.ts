@@ -1,4 +1,4 @@
-import type { Settings, DomainPermission, EncryptedTokens } from '../types';
+import type { Settings, DomainPermission, EncryptedTokens, EncryptedCodexOAuth } from '../types';
 
 export const DEFAULT_SETTINGS: Settings = {
   llmProvider: 'chatgpt-subscription',
@@ -71,4 +71,18 @@ export async function getEncryptionKeyEncoded(): Promise<string | null> {
 
 export async function setEncryptionKeyEncoded(key: string): Promise<void> {
   await chrome.storage.local.set({ _encryptionKey: key });
+}
+
+// Codex OAuth token storage
+export async function getCodexOAuthTokens(): Promise<EncryptedCodexOAuth | null> {
+  const result = await chrome.storage.local.get('codexOAuthTokens');
+  return result.codexOAuthTokens ?? null;
+}
+
+export async function setCodexOAuthTokens(tokens: EncryptedCodexOAuth | null): Promise<void> {
+  if (tokens) {
+    await chrome.storage.local.set({ codexOAuthTokens: tokens });
+  } else {
+    await chrome.storage.local.remove('codexOAuthTokens');
+  }
 }
