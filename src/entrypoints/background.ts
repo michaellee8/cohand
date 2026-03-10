@@ -15,6 +15,9 @@ import {
   getTaskState,
   putStateSnapshot,
   capStateSnapshots,
+  putRecording,
+  putRecordingStep,
+  deleteRecordingStep as dbDeleteRecordingStep,
 } from '../lib/db-helpers';
 import {
   getRecentNotifications,
@@ -36,10 +39,28 @@ import {
   addDomainPermission,
   removeDomainPermission,
   migrateStorage,
+  setCodexOAuthTokens,
+  getEncryptionKeyEncoded,
+  setEncryptionKeyEncoded,
 } from '../lib/storage';
 import { createRemoteHandler } from '../lib/remote/remote-server';
 import { claimTab, releaseTab } from '../lib/remote/remote-relay';
-import type { ScriptVersion, ScriptRun } from '../types';
+import {
+  addOAuthRedirectRule,
+  removeOAuthRedirectRule,
+  startAdaptiveMonitor,
+  exchangeCodeForToken,
+  generatePKCE,
+  buildAuthUrl,
+  cleanupStaleOAuthState,
+} from '../lib/codex-oauth';
+import {
+  generateEncryptionKey,
+  exportKey,
+  importKey,
+  encrypt,
+} from '../lib/crypto';
+import type { ScriptVersion, ScriptRun, RecordingStep } from '../types';
 
 export default defineBackground(() => {
   console.log('[Cohand] Service worker started');
@@ -58,6 +79,9 @@ export default defineBackground(() => {
   const executionAbortControllers = new Map<string, AbortController>();
   // Override domains for test executions (temp taskId -> domains)
   const testDomainOverrides = new Map<string, string[]>();
+
+  // Recording port (long-lived connection from sidepanel)
+  let recordingPort: chrome.runtime.Port | null = null;
 
   let db: IDBDatabase;
 
@@ -118,6 +142,14 @@ export default defineBackground(() => {
       // Start listening for RPC connections (long-lived ports)
       rpcHandler.listen();
 
+      // Listen for recording stream port connections
+      chrome.runtime.onConnect.addListener((port) => {
+        if (port.name === 'recording-stream') {
+          recordingPort = port;
+          port.onDisconnect.addListener(() => { recordingPort = null; });
+        }
+      });
+
       // Register remote mode handler
       const remoteHandler = createRemoteHandler(cdp, getTabUrl);
       chrome.runtime.onMessageExternal.addListener(remoteHandler);
@@ -137,6 +169,9 @@ export default defineBackground(() => {
       pruneOldUsage(db).catch(err =>
         console.error('[Cohand] Failed to prune LLM usage:', err),
       );
+
+      // Clean up any stale OAuth state from interrupted flows
+      await cleanupStaleOAuthState();
 
       console.log('[Cohand] Service worker initialized');
     } catch (err) {
@@ -512,6 +547,130 @@ export default defineBackground(() => {
 
   router.on('REMOVE_DOMAIN_PERMISSION', async (msg) => {
     await removeDomainPermission(msg.domain);
+    return { ok: true as const };
+  });
+
+  // ---------------------------------------------------------------------------
+  // Recording
+  // ---------------------------------------------------------------------------
+
+  router.on('START_RECORDING', async (msg) => {
+    const sessionId = `rec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await putRecording(db, {
+      id: sessionId,
+      startedAt: new Date().toISOString(),
+      activeTabId: msg.tabId,
+      trackedTabs: [msg.tabId],
+      stepCount: 0,
+    });
+    return { ok: true as const, sessionId };
+  });
+
+  router.on('STOP_RECORDING', async (_msg) => {
+    // Could update recording.completedAt here in future
+    return { ok: true as const };
+  });
+
+  router.on('DELETE_RECORDING_STEP', async (msg) => {
+    await dbDeleteRecordingStep(db, msg.stepId);
+    return { ok: true as const };
+  });
+
+  // Content script events (recording actions) — separate from router
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === 'RECORDING_ACTION' && sender.tab) {
+      // Acknowledge immediately
+      sendResponse({ ok: true });
+
+      // Async enrichment (screenshot + persist + forward)
+      (async () => {
+        try {
+          // Capture screenshot
+          let screenshot: string | undefined;
+          try {
+            screenshot = await chrome.tabs.captureVisibleTab(
+              sender.tab!.windowId!,
+              { format: 'png' },
+            );
+          } catch {
+            // Screenshot may fail on restricted pages
+          }
+
+          const step: RecordingStep = {
+            id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            recordingId: '', // Set by the sidepanel store
+            sequenceIndex: 0, // Set by the sidepanel store
+            status: 'enriched',
+            ...msg.action,
+            screenshot,
+          };
+
+          // Persist step to IndexedDB (without screenshot)
+          const { screenshot: _, ...stepWithoutScreenshot } = step;
+          await putRecordingStep(db, stepWithoutScreenshot as any);
+
+          // Forward enriched step via recording port
+          recordingPort?.postMessage({ type: 'RECORDING_STEP', step });
+        } catch (err) {
+          console.error('[Cohand] Failed to process recording action:', err);
+        }
+      })();
+
+      return true; // async response
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // OAuth
+  // ---------------------------------------------------------------------------
+
+  router.on('START_CODEX_OAUTH', async () => {
+    const { verifier, challenge } = await generatePKCE();
+    const state = crypto.randomUUID();
+    await chrome.storage.local.set({
+      _oauthPkce: { verifier, state, createdAt: Date.now() },
+    });
+    await addOAuthRedirectRule(chrome.runtime.id);
+    const authUrl = buildAuthUrl(challenge, state);
+    const tab = await chrome.tabs.create({ url: authUrl });
+    if (tab.id) startAdaptiveMonitor(tab.id);
+    return { ok: true as const };
+  });
+
+  router.on('OAUTH_CALLBACK', async (msg) => {
+    const pkceData = (await chrome.storage.local.get('_oauthPkce'))._oauthPkce as
+      | { verifier: string; state: string; createdAt: number }
+      | undefined;
+    if (!pkceData || pkceData.state !== msg.state) {
+      throw new Error('Invalid OAuth state');
+    }
+
+    await removeOAuthRedirectRule();
+
+    const creds = await exchangeCodeForToken(msg.code, pkceData.verifier);
+
+    // Encrypt tokens before storage
+    let keyEncoded = await getEncryptionKeyEncoded();
+    if (!keyEncoded) {
+      const cryptoKey = await generateEncryptionKey();
+      keyEncoded = await exportKey(cryptoKey);
+      await setEncryptionKeyEncoded(keyEncoded);
+    }
+
+    const key = await importKey(keyEncoded);
+    await setCodexOAuthTokens({
+      access: await encrypt(key, creds.access),
+      refresh: await encrypt(key, creds.refresh),
+      expires: creds.expires,
+      accountId: creds.accountId,
+    });
+
+    await chrome.storage.local.remove('_oauthPkce');
+    return { ok: true as const };
+  });
+
+  router.on('LOGOUT_CODEX', async () => {
+    await setCodexOAuthTokens(null);
     return { ok: true as const };
   });
 
