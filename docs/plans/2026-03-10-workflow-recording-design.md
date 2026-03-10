@@ -36,7 +36,7 @@ Programmatically captured scripts from user interactions have never been reliabl
 
 ## 2. Content Script — Element Selector Overlay
 
-When recording starts, a new content script module is injected into the active tab via `chrome.scripting.executeScript()` from the service worker on `START_RECORDING` message. Removed on `STOP_RECORDING`.
+When the service worker receives a `START_RECORDING` message, it sends an `ACTIVATE_RECORDING` message to the existing content script on the active tab. The recording overlay is a conditionally-activated module within the existing `content.ts` — not a separate `executeScript()` injection. This avoids duplicate content script contexts and listener conflicts. Deactivated on `DEACTIVATE_RECORDING` message.
 
 ### Click Capture
 
@@ -58,7 +58,11 @@ Per click, the overlay captures:
 ### Navigation Capture
 
 - URL, page title, tab ID
-- Auto-detected via `chrome.webNavigation.onCompleted` listener in service worker
+- Auto-detected via `chrome.webNavigation.onCompleted` listener in service worker (requires `webNavigation` permission)
+
+### Click Deduplication
+
+Rapid double-clicks on the same element within 300ms are collapsed into a single step. This prevents inflated step counts from accidental double-clicks.
 
 ### Visual Feedback
 
@@ -110,10 +114,13 @@ interface RecordingSession {
   completedAt?: string
   activeTabId: number
   trackedTabs: number[]         // plain array, not Set (serialization-safe)
-  pageSnapshots: Record<string, A11yNode>  // keyed by URL, captured once per unique URL
+  pageSnapshots: Record<string, A11yNode>  // keyed by URL, max 20 URLs, max 50KB per tree
   steps: RecordingStep[]
   generatedTaskId?: string      // set after script generation
 }
+// Constraints: pageSnapshots capped at 20 unique URLs. A11y trees truncated to 5 levels
+// depth and 50KB max per snapshot. Snapshots persisted to IndexedDB as captured (not
+// just in-memory) via a recording_page_snapshots store to survive sidepanel crashes.
 ```
 
 ### Zustand Store (recording-store.ts)
@@ -137,17 +144,24 @@ interface RecordingState {
 
 ### Communication Architecture
 
-Long-lived port (`chrome.runtime.connect()`) from sidepanel to service worker when recording starts. Service worker acknowledges content script events immediately via `sendResponse({ ok: true })`, enriches asynchronously (screenshot via `captureVisibleTab()`), and forwards enriched steps via the port. Buffered in `chrome.storage.session` if port disconnects.
+Long-lived port (`chrome.runtime.connect({ name: 'recording-stream' })`) from sidepanel to service worker when recording starts. Port name `'recording-stream'` is distinct from existing `'script-rpc'` port. Service worker acknowledges content script events immediately via `sendResponse({ ok: true })`, enriches asynchronously (screenshot via `captureVisibleTab()`), and forwards enriched steps via the port.
+
+If the port disconnects (sidepanel crash/close), steps are buffered in `chrome.storage.session` with the session ID and `bufferedAt` timestamp. On reconnect, buffered steps are drained. On service worker restart, orphaned buffers (no matching active session) are discarded with a user notification: "Recording was interrupted."
 
 ```
 Content script
   → chrome.runtime.sendMessage({ type: 'RECORDING_ACTION', ... })
-      → Service worker acknowledges immediately
+      → Service worker acknowledges immediately (sendResponse)
       → Async: captureVisibleTab() for screenshot
-      → Forward enriched step via long-lived port to sidepanel
+      → Forward enriched step (status: 'enriched') via 'recording-stream' port
           → Recording store appends step
-          → Triggers LLM description enhancement
+          → Sidepanel fires LLM description enhancement (fire-and-forget per step)
+          → On description received, updates step status to 'described'
+          → If LLM call fails, step stays 'enriched' (description left blank)
+          → At recording stop, any remaining 'enriched' steps are batch-described
 ```
+
+**LLM description strategy:** Per-step enhancement is fire-and-forget — each step triggers an async LLM call in the sidepanel as soon as it arrives. If the call completes before the next step, the description appears immediately. If the user stops recording before all descriptions are back, remaining steps are batch-described in one call. This balances responsiveness with cost.
 
 ### Message Types
 
@@ -160,10 +174,17 @@ type ContentScriptEvent =
   | { type: 'KEYSTROKE_UPDATE'; text: string; element: ElementInfo; isFinal: boolean }
   | { type: 'ELEMENT_SELECTION'; elementInfo: ElementInfo; url: string; cancelled?: boolean }
 
-// Service worker → Sidepanel (via long-lived port)
+// Service worker → Sidepanel (via 'recording-stream' long-lived port)
 type RecordingPortMessage =
   | { type: 'RECORDING_STEP'; step: RecordingStep }
   | { type: 'PAGE_SNAPSHOT'; url: string; tree: A11yNode }
+
+// Sidepanel → Service worker (command messages, extend existing Message union)
+// START_RECORDING: { tabId: number }
+// STOP_RECORDING: { sessionId: string }
+// These are added to the existing Message union in messages.ts alongside
+// ContentScriptEvent types. The service worker router uses sender.tab to
+// distinguish content script events from sidepanel commands.
 ```
 
 ### IndexedDB Schema
@@ -204,7 +225,18 @@ interface RecordingStepRecord {
   description?: string
   // screenshot intentionally omitted — stripped before persist
 }
+
+// recording_page_snapshots store — indexed by [recordingId, url]
+interface RecordingPageSnapshot {
+  id: string
+  recordingId: string
+  url: string
+  tree: unknown              // A11yNode, serialized, max 50KB
+  capturedAt: string         // ISO-8601
+}
 ```
+
+**DB version bump:** Adding these stores requires incrementing `DB_VERSION` from 1 to 2 with an `onupgradeneeded` handler that creates the new stores only if upgrading from v1.
 
 ## 4. Voice Narration
 
@@ -216,6 +248,7 @@ Speech-to-text runs in the sidepanel via the Web Speech API (`SpeechRecognition`
 - Interim transcripts shown in recording UI as live subtitle
 - Final transcripts attached to the most recent step's `speechTranscript` field
 - If user speaks without performing an action, a standalone `narration` step is created with `description: 'Note: "..."'`
+- `sequenceIndex` for narration steps uses speech start time (not end time) to maintain correct ordering relative to action steps, since speech recognition `final` events can fire with 0.5-2s delay
 
 ### Permission Flow
 
@@ -237,7 +270,26 @@ Fixes the currently non-functional "ChatGPT Subscription" provider to use real O
 
 ### OAuth Flow — declarativeNetRequest with Adaptive Rule Lifecycle
 
-Uses dynamic `declarativeNetRequest` rules to intercept the localhost OAuth redirect at the network level. The rule redirects `http://localhost:1455/auth/callback?*` to `chrome-extension://<id>/oauth-callback.html?*` before any connection attempt — user never sees a connection error.
+Uses dynamic `declarativeNetRequest` rules to intercept the localhost OAuth redirect at the network level. The rule uses `regexSubstitution` to preserve query parameters:
+
+```json
+{
+  "id": 99999,
+  "priority": 1,
+  "action": {
+    "type": "redirect",
+    "redirect": {
+      "regexSubstitution": "chrome-extension://EXTENSION_ID/oauth-callback.html\\1"
+    }
+  },
+  "condition": {
+    "regexFilter": "^http://localhost:1455/auth/callback(\\?.*)?$",
+    "resourceTypes": ["main_frame"]
+  }
+}
+```
+
+The extension ID is injected at runtime via `chrome.runtime.id`. The `regexSubstitution` capture group `\\1` preserves the `?code=X&state=Y` query string. User never sees a connection error.
 
 **Adaptive rule management (defensive against disrupting normal Codex CLI usage):**
 
@@ -252,7 +304,8 @@ Uses dynamic `declarativeNetRequest` rules to intercept the localhost OAuth redi
 ```
 startOAuth():
   1. Add dynamic declarativeNetRequest rule
-  2. Generate PKCE challenge/verifier, store in chrome.storage.session
+  2. Generate PKCE challenge/verifier, store in chrome.storage.local with 10-minute TTL
+     (NOT chrome.storage.session — survives service worker restarts during consent page)
   3. Open auth tab to:
      https://auth.openai.com/oauth/authorize?
        response_type=code&
@@ -278,6 +331,8 @@ startOAuth():
 - Hard 5-minute cap prevents permanent state
 - Startup cleanup handles crashes
 - Codex CLI collision requires simultaneous auth on the same machine — extremely unlikely
+- On startup, cleanup stale PKCE state (older than 10 minutes) from `chrome.storage.local`
+- On token exchange failure from missing verifier (SW restart), show "Login timed out — please try again"
 
 ### Token Exchange
 
@@ -305,16 +360,24 @@ const accountId = payload['https://api.openai.com/auth'].chatgpt_account_id;
 
 ### Token Storage
 
-Encrypt with AES-GCM (existing crypto.ts), store in `chrome.storage.local`:
+Encrypt with AES-GCM (existing crypto.ts), store in `chrome.storage.local` as a new top-level key `codexOAuthTokens` (separate from the existing `encryptedTokens` which holds API keys):
 
 ```typescript
-interface CodexOAuthTokens {
-  accessToken: string      // encrypted
-  refreshToken: string     // encrypted
-  expiresAt: number        // milliseconds timestamp
-  accountId: string
+// New field added to StorageLocal interface in src/types/storage.ts
+interface StorageLocal {
+  // ... existing fields ...
+  codexOAuthTokens?: EncryptedCodexOAuth
+}
+
+interface EncryptedCodexOAuth {
+  accessToken: string      // encrypted with AES-GCM
+  refreshToken: string     // encrypted with AES-GCM
+  expiresAt: number        // milliseconds timestamp (plaintext, not sensitive)
+  accountId: string        // plaintext, needed for API headers
 }
 ```
+
+The existing `settings-store.ts` `hasApiKey` check is updated: `hasApiKey: !!(tokens.apiKey || tokens.oauthToken || codexOAuth?.accessToken)`.
 
 ### Token Refresh
 
@@ -326,6 +389,8 @@ grant_type=refresh_token
 refresh_token={token}
 client_id=app_EMoamEEZ73f0CkXaXp7hrann
 ```
+
+**Refresh mutex:** A single in-flight `Promise<void>` prevents concurrent refresh races. If two callers (e.g., dual-model security review's `Promise.all`) both see an expired token, only the first triggers a refresh — the second awaits the same promise. This prevents the second refresh from using an already-invalidated refresh token.
 
 ### Codex Responses API
 
@@ -356,18 +421,42 @@ Body:
 
 Response: SSE stream with events `response.created`, `response.done`, `response.completed`, `response.failed`, `error`.
 
-**Provider routing:** Only `chatgpt-subscription` uses the Codex Responses API. All other providers (OpenAI API, Anthropic, Gemini, custom) continue using the existing `LLMClient` with standard `chat.completions.create()`.
+**Error handling:**
+- `response.failed`: Surface error to user, do not retry automatically (may be a content policy rejection)
+- HTTP 429 (rate limit): Parse `Retry-After` header, show "Usage limit reached ({plan_type} plan). Try again in ~{mins} minutes."
+- HTTP 500/502/503/504: Retry once with 2-second backoff, then surface error
+- SSE idle timeout: If no bytes received for 30 seconds, abort stream and surface timeout error
+- Usage tracking: Parse `usage` field from `response.completed` event to populate `llm_usage` IndexedDB store. If field format differs from OpenAI SDK, map accordingly.
+
+### LLM Client Architecture
+
+Define a common `ILLMClient` interface that both clients implement:
+
+```typescript
+interface ILLMClient {
+  chat(messages: ChatMessage[], opts?: LLMCallOptions): Promise<string>
+  stream(messages: ChatMessage[], opts?: LLMCallOptions): AsyncGenerator<string>
+}
+```
+
+`LLMClient` (existing, wraps OpenAI SDK) and `CodexResponsesClient` (new, direct fetch + SSE) both implement `ILLMClient`. The `CodexResponsesClient` maps `input`/`instructions` format internally. `createSecurityReviewClients()` returns `[ILLMClient, ILLMClient]`. All callers (`wizard-store.ts`, `chat-store.ts`, `self-healing.ts`) reference `ILLMClient`.
+
+**Provider routing:** Only `chatgpt-subscription` uses `CodexResponsesClient`. All other providers (OpenAI API, Anthropic, Gemini, custom) continue using `LLMClient` with standard `chat.completions.create()`.
 
 ### Manifest Additions
 
 ```json
 {
-  "permissions": ["declarativeNetRequest"],
-  "host_permissions": ["<all_urls>"]
+  "permissions": ["declarativeNetRequest", "webNavigation"],
+  "host_permissions": ["<all_urls>"],
+  "web_accessible_resources": [{
+    "resources": ["oauth-callback.html"],
+    "matches": ["http://localhost/*"]
+  }]
 }
 ```
 
-`oauth-callback.html` registered as a web-accessible resource.
+`oauth-callback.html` must be declared as a `web_accessible_resource` so the `declarativeNetRequest` redirect can navigate to it from a `localhost` origin. WXT must build it as a page entrypoint (not content script).
 
 ## 6. Refinement Chat & Script Generation
 
@@ -457,8 +546,10 @@ Data the script reads from the page goes through the injection scanner before be
 ### Self-Healing Integration
 
 - Natural-language task description stored alongside script
-- When self-healing triggers, LLM has both description AND original recording metadata (a11y subtrees, selectors) as repair context
+- `ScriptVersion.generatedBy` extended with `'recording'` value + optional `recordingId?: string` linking back to `RecordingRecord`
+- When self-healing triggers for recording-originated scripts, LLM has: the description, the persisted `recording_steps` (a11y subtrees, selectors), and the `recording_page_snapshots` (full a11y trees from recording time) as repair context
 - Richer context than scripts generated from text prompts alone
+- The self-healing loop checks `generatedBy === 'recording'` to load this additional context
 
 ## 8. UI Components
 
@@ -522,10 +613,14 @@ Data the script reads from the page goes through the injection scanner before be
 - `src/entrypoints/sidepanel/pages/ChatPage.tsx` — recording toolbar, live step list, refinement chat
 - `src/entrypoints/sidepanel/pages/SettingsPage.tsx` — OAuth login button, connected state
 - `src/entrypoints/sidepanel/stores/chat-store.ts` — recording-to-chat transition
-- `src/lib/llm-client.ts` — add CodexResponsesClient alongside existing OpenAI client
-- `src/lib/db.ts` — add recordings and recording_steps IndexedDB stores
-- `src/lib/messages.ts` — add ContentScriptEvent union, recording messages, OAuth messages
-- `wxt.config.ts` — add declarativeNetRequest permission, oauth-callback.html entrypoint
+- `src/lib/llm-client.ts` — extract `ILLMClient` interface, add `CodexResponsesClient`
+- `src/lib/db.ts` — add `recordings`, `recording_steps`, `recording_page_snapshots` stores; bump `DB_VERSION` to 2
+- `src/lib/messages.ts` — add `ContentScriptEvent` union, `START_RECORDING`/`STOP_RECORDING`, OAuth messages
+- `src/types/storage.ts` — add `codexOAuthTokens?: EncryptedCodexOAuth` to `StorageLocal`
+- `src/types/script.ts` — add `'recording'` to `generatedBy` union, add `recordingId?: string`
+- `src/lib/self-healing.ts` — load recording context for `generatedBy === 'recording'` scripts
+- `src/constants.ts` — bump `DB_VERSION` to 2
+- `wxt.config.ts` — add `declarativeNetRequest` + `webNavigation` permissions, `oauth-callback.html` as web-accessible resource
 
 ### Dependencies
 
