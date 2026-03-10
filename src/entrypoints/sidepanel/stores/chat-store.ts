@@ -1,8 +1,10 @@
 import { create } from 'zustand';
-import { stream as piStream } from '@mariozechner/pi-ai';
+import { stream as piStream, complete as piComplete } from '@mariozechner/pi-ai';
 import { resolveModel } from '../../../lib/pi-ai-bridge';
 import { getSettings, getEncryptedTokens, getEncryptionKeyEncoded } from '../../../lib/storage';
 import { decrypt, importKey } from '../../../lib/crypto';
+import type { RecordingSession } from '../../../types/recording';
+import { buildRecordingGenerationMessages, parseGenerationOutput } from '../../../lib/recording/recording-prompts';
 
 export interface ChatMessage {
   id: string;
@@ -20,10 +22,14 @@ interface ChatState {
   apiKey: string | null;
   abortController: AbortController | null;
 
+  generatedScript: string | null;
+  generatedDescription: string | null;
+
   initClient: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   cancelStream: () => void;
   clearChat: () => void;
+  submitRecordingRefinement: (recording: RecordingSession, instructions: string) => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -38,6 +44,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   model: null,
   apiKey: null,
   abortController: null,
+  generatedScript: null,
+  generatedDescription: null,
 
   initClient: async () => {
     try {
@@ -179,5 +187,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
       error: null,
       abortController: null,
     });
+  },
+
+  submitRecordingRefinement: async (recording: RecordingSession, instructions: string) => {
+    const { model, apiKey } = get();
+    if (!model || !apiKey) {
+      set({ error: 'LLM not initialized' });
+      return;
+    }
+
+    set({ isStreaming: true, error: null, generatedScript: null, generatedDescription: null });
+
+    try {
+      const rawMessages = buildRecordingGenerationMessages({
+        steps: recording.steps,
+        pageSnapshots: Object.entries(recording.pageSnapshots).map(([snapshotKey, tree]) => ({ snapshotKey, tree })),
+        refinementInstructions: instructions,
+        domains: [],
+      });
+
+      const context = {
+        systemPrompt: rawMessages[0].content,
+        messages: rawMessages.slice(1).map(m => ({
+          role: m.role as 'user' | 'assistant',
+          content: [{ type: 'text' as const, text: m.content }],
+        })),
+      };
+
+      const result = await piComplete(model, context as any, { apiKey, transport: 'sse' });
+      const text = typeof result === 'string' ? result : (result as any)?.message?.content?.[0]?.text ?? '';
+      const { description, script } = parseGenerationOutput(text);
+
+      set({ generatedScript: script, generatedDescription: description, isStreaming: false });
+    } catch (err: any) {
+      set({ error: err.message, isStreaming: false });
+    }
   },
 }));
