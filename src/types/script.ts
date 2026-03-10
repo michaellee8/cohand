@@ -4,7 +4,8 @@ export interface ScriptVersion {
   version: number;
   source: string;
   checksum: string; // SHA-256
-  generatedBy: 'explorer' | 'repair' | 'user_edit';
+  generatedBy: 'explorer' | 'repair' | 'user_edit' | 'recording';
+  recordingId?: string;
   astValidationPassed: boolean;
   securityReviewPassed: boolean;
   reviewDetails: ReviewDetail[];

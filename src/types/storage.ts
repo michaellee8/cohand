@@ -1,8 +1,11 @@
+import type { EncryptedCodexOAuth } from './recording';
+
 export interface StorageLocal {
   _storageSchemaVersion: number;
   settings: Settings;
   encryptedTokens: EncryptedTokens;
   domainPermissions: DomainPermission[];
+  codexOAuthTokens?: EncryptedCodexOAuth;
 }
 
 export interface Settings {
