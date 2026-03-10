@@ -12,6 +12,8 @@ interface SettingsState {
   settings: Settings | null;
   domainPermissions: DomainPermission[];
   hasApiKey: boolean;
+  codexConnected: boolean;
+  codexAccountId: string | null;
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -22,12 +24,16 @@ interface SettingsState {
   clearApiKey: () => Promise<void>;
   addDomain: (domain: string) => Promise<void>;
   removeDomain: (domain: string) => Promise<void>;
+  startCodexLogin: () => Promise<void>;
+  logoutCodex: () => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: null,
   domainPermissions: [],
   hasApiKey: false,
+  codexConnected: false,
+  codexAccountId: null,
   loading: false,
   saving: false,
   error: null,
@@ -45,6 +51,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         settings,
         domainPermissions: permissions,
         hasApiKey: !!(tokens.apiKey || tokens.oauthToken || codexOAuth?.access),
+        codexConnected: !!codexOAuth?.access,
+        codexAccountId: codexOAuth?.accountId ?? null,
         loading: false,
       });
     } catch (err: any) {
@@ -119,5 +127,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err: any) {
       set({ error: err.message });
     }
+  },
+
+  startCodexLogin: async () => {
+    await chrome.runtime.sendMessage({ type: 'START_CODEX_OAUTH' });
+  },
+
+  logoutCodex: async () => {
+    await chrome.runtime.sendMessage({ type: 'LOGOUT_CODEX' });
+    set({ codexConnected: false, codexAccountId: null, hasApiKey: false });
   },
 }));

@@ -8,7 +8,9 @@ interface SettingsPageProps {
 export function SettingsPage({ onBack }: SettingsPageProps) {
   const {
     settings, domainPermissions, hasApiKey, loading, saving,
+    codexConnected, codexAccountId,
     load, updateSettings, saveApiKey, clearApiKey, addDomain, removeDomain,
+    startCodexLogin, logoutCodex,
   } = useSettingsStore();
 
   const [apiKeyInput, setApiKeyInput] = useState('');
@@ -109,6 +111,26 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                   Save
                 </button>
               </div>
+            )}
+          </section>
+        )}
+
+        {/* ChatGPT Account */}
+        {settings.llmProvider === 'chatgpt-subscription' && (
+          <section>
+            <h2 className="text-sm font-semibold text-gray-700 mb-2">ChatGPT Account</h2>
+            {codexConnected ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-green-600">Connected{codexAccountId ? ` (${codexAccountId})` : ''}</span>
+                <button onClick={logoutCodex} className="text-xs text-red-500 hover:text-red-700">Logout</button>
+              </div>
+            ) : (
+              <button
+                onClick={startCodexLogin}
+                className="w-full bg-green-500 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-green-600"
+              >
+                Login with ChatGPT
+              </button>
             )}
           </section>
         )}
