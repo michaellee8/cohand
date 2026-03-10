@@ -14,7 +14,7 @@ export default defineConfig({
     permissions: [
       'debugger', 'sidePanel', 'storage', 'activeTab', 'scripting',
       'tabs', 'tabGroups', 'alarms', 'notifications', 'offscreen',
-      'unlimitedStorage',
+      'unlimitedStorage', 'declarativeNetRequest', 'webNavigation',
     ],
     host_permissions: ['<all_urls>'],
     content_security_policy: {
@@ -23,5 +23,9 @@ export default defineConfig({
     sandbox: {
       pages: ['sandbox.html'],
     },
+    web_accessible_resources: [{
+      resources: ['oauth-callback.html'],
+      matches: ['http://localhost/*'],
+    }],
   },
 });

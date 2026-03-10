@@ -7,7 +7,8 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:e2e": "node --test e2e/tests/e2e.test.mjs",
     "test:e2e:flow": "node --test e2e/tests/task-flow.test.mjs",
     "test:e2e:all": "node --test e2e/tests/*.test.mjs"
@@ -21,10 +22,11 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@mariozechner/pi-ai": "^0.57.1",
     "@tailwindcss/vite": "^4.2.1",
     "acorn": "^8.16.0",
     "acorn-walk": "^8.3.5",
-    "openai": "^6.27.0",
+    "openai": "^6.26.0",
     "quickjs-emscripten": "^0.32.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
