@@ -20,6 +20,24 @@ import { MessageRouter } from './message-router';
 import { putTask, putScriptVersion, putTaskState } from './db-helpers';
 import type { Task, ScriptVersion } from '../types/index';
 
+// Mock pi-ai's complete function for security review tests
+const mockComplete = vi.fn();
+vi.mock('@mariozechner/pi-ai', () => ({
+  complete: (...args: any[]) => mockComplete(...args),
+}));
+
+function makeAssistantMessage(text: string) {
+  return {
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    model: 'test',
+    provider: 'test',
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+  };
+}
+
+const TEST_API_KEY = 'test-api-key';
+
 // ---------------------------------------------------------------------------
 // Chrome API mocks
 // ---------------------------------------------------------------------------
@@ -305,16 +323,22 @@ describe('Task creation via CREATE_TASK handler', () => {
 // ---------------------------------------------------------------------------
 
 describe('Security review integration', () => {
+  beforeEach(() => {
+    mockComplete.mockReset();
+  });
+
   it('dual review approves safe script', async () => {
-    const mockClient = {
-      chat: vi.fn(async () => JSON.stringify({ approved: true, issues: [] })),
-      stream: vi.fn(),
-      modelName: 'test-model',
-    } as any;
+    const model1 = { id: 'test-model' };
+    const model2 = { id: 'test-model' };
+
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })));
 
     const result = await securityReview(
       'async function run(page) { await page.goto("https://example.com"); }',
-      [mockClient, mockClient],
+      [model1, model2],
+      TEST_API_KEY,
     );
 
     expect(result.approved).toBe(true);
@@ -322,36 +346,37 @@ describe('Security review integration', () => {
   });
 
   it('dual review rejects when one model rejects', async () => {
-    const approveClient = {
-      chat: vi.fn(async () => JSON.stringify({ approved: true, issues: [] })),
-      modelName: 'approver',
-    } as any;
+    const model1 = { id: 'approver' };
+    const model2 = { id: 'rejector' };
 
-    const rejectClient = {
-      chat: vi.fn(async () => JSON.stringify({
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({
         approved: false,
         issues: ['Detects potential data exfiltration'],
-      })),
-      modelName: 'rejector',
-    } as any;
+      })));
 
     const result = await securityReview(
       'async function run(page) { /* suspicious */ }',
-      [approveClient, rejectClient],
+      [model1, model2],
+      TEST_API_KEY,
     );
 
     expect(result.approved).toBe(false);
   });
 
   it('fails closed on LLM error', async () => {
-    const errorClient = {
-      chat: vi.fn(async () => { throw new Error('API error'); }),
-      modelName: 'error-model',
-    } as any;
+    const model1 = { id: 'error-model' };
+    const model2 = { id: 'error-model' };
+
+    mockComplete
+      .mockRejectedValueOnce(new Error('API error'))
+      .mockRejectedValueOnce(new Error('API error'));
 
     const result = await securityReview(
       'async function run(page) {}',
-      [errorClient, errorClient],
+      [model1, model2],
+      TEST_API_KEY,
     );
 
     expect(result.approved).toBe(false);
@@ -359,14 +384,17 @@ describe('Security review integration', () => {
   });
 
   it('fails closed on malformed response', async () => {
-    const badClient = {
-      chat: vi.fn(async () => JSON.stringify({ wrong: 'format' })),
-      modelName: 'bad-model',
-    } as any;
+    const model1 = { id: 'bad-model' };
+    const model2 = { id: 'bad-model' };
+
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ wrong: 'format' })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ wrong: 'format' })));
 
     const result = await securityReview(
       'async function run(page) {}',
-      [badClient, badClient],
+      [model1, model2],
+      TEST_API_KEY,
     );
 
     expect(result.approved).toBe(false);
@@ -406,14 +434,18 @@ async function run(page, context) {
     expect(astResult.valid).toBe(true);
 
     // 4. Security review (mocked)
-    const mockReviewClient = {
-      chat: vi.fn(async () => JSON.stringify({ approved: true, issues: [] })),
-      modelName: 'gpt-5.4',
-    } as any;
+    const mockReviewModel1 = { id: 'gpt-5.4' };
+    const mockReviewModel2 = { id: 'gpt-5.4' };
+
+    mockComplete.mockReset();
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })));
 
     const reviewResult = await securityReview(
       generatedSource,
-      [mockReviewClient, mockReviewClient],
+      [mockReviewModel1, mockReviewModel2],
+      TEST_API_KEY,
     );
     expect(reviewResult.approved).toBe(true);
 

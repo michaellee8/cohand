@@ -1,14 +1,28 @@
-import { describe, it, expect, vi } from 'vitest';
-import type { LLMClient } from '../llm-client';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { securityReview } from './security-review';
 import { buildReviewMessages, DATA_FLOW_REVIEW_PROMPT, CAPABILITY_REVIEW_PROMPT } from './review-prompts';
 
-function createMockClient(response: string, modelName = 'test-model'): LLMClient {
-  return {
-    chat: vi.fn().mockResolvedValue(response),
-    modelName,
-  } as unknown as LLMClient;
+// Mock pi-ai's complete function
+const mockComplete = vi.fn();
+vi.mock('@mariozechner/pi-ai', () => ({
+  complete: (...args: any[]) => mockComplete(...args),
+}));
+
+function createMockModel(id: string) {
+  return { id };
 }
+
+function makeAssistantMessage(text: string) {
+  return {
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    model: 'test',
+    provider: 'test',
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+  };
+}
+
+const TEST_API_KEY = 'test-api-key';
 
 describe('securityReview', () => {
   const safeScript = `
@@ -20,11 +34,19 @@ describe('securityReview', () => {
     }
   `;
 
-  it('approves when both models approve', async () => {
-    const client1 = createMockClient(JSON.stringify({ approved: true, issues: [] }), 'model-a');
-    const client2 = createMockClient(JSON.stringify({ approved: true, issues: [] }), 'model-b');
+  beforeEach(() => {
+    mockComplete.mockReset();
+  });
 
-    const result = await securityReview(safeScript, [client1, client2]);
+  it('approves when both models approve', async () => {
+    const model1 = createMockModel('model-a');
+    const model2 = createMockModel('model-b');
+
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })));
+
+    const result = await securityReview(safeScript, [model1, model2], TEST_API_KEY);
 
     expect(result.approved).toBe(true);
     expect(result.details).toHaveLength(2);
@@ -33,16 +55,14 @@ describe('securityReview', () => {
   });
 
   it('rejects when first model rejects', async () => {
-    const client1 = createMockClient(
-      JSON.stringify({ approved: false, issues: ['Data exfiltration risk'] }),
-      'model-a',
-    );
-    const client2 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-b',
-    );
+    const model1 = createMockModel('model-a');
+    const model2 = createMockModel('model-b');
 
-    const result = await securityReview(safeScript, [client1, client2]);
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: false, issues: ['Data exfiltration risk'] })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })));
+
+    const result = await securityReview(safeScript, [model1, model2], TEST_API_KEY);
 
     expect(result.approved).toBe(false);
     expect(result.details[0].approved).toBe(false);
@@ -51,16 +71,14 @@ describe('securityReview', () => {
   });
 
   it('rejects when second model rejects', async () => {
-    const client1 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-a',
-    );
-    const client2 = createMockClient(
-      JSON.stringify({ approved: false, issues: ['Capability escape detected'] }),
-      'model-b',
-    );
+    const model1 = createMockModel('model-a');
+    const model2 = createMockModel('model-b');
 
-    const result = await securityReview(safeScript, [client1, client2]);
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: false, issues: ['Capability escape detected'] })));
+
+    const result = await securityReview(safeScript, [model1, model2], TEST_API_KEY);
 
     expect(result.approved).toBe(false);
     expect(result.details[0].approved).toBe(true);
@@ -69,16 +87,14 @@ describe('securityReview', () => {
   });
 
   it('rejects with both details when both models reject', async () => {
-    const client1 = createMockClient(
-      JSON.stringify({ approved: false, issues: ['Issue A'] }),
-      'model-a',
-    );
-    const client2 = createMockClient(
-      JSON.stringify({ approved: false, issues: ['Issue B'] }),
-      'model-b',
-    );
+    const model1 = createMockModel('model-a');
+    const model2 = createMockModel('model-b');
 
-    const result = await securityReview(safeScript, [client1, client2]);
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: false, issues: ['Issue A'] })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: false, issues: ['Issue B'] })));
+
+    const result = await securityReview(safeScript, [model1, model2], TEST_API_KEY);
 
     expect(result.approved).toBe(false);
     expect(result.details).toHaveLength(2);
@@ -89,13 +105,14 @@ describe('securityReview', () => {
   });
 
   it('fail-closed on malformed JSON response', async () => {
-    const client1 = createMockClient('not valid json', 'model-a');
-    const client2 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-b',
-    );
+    const model1 = createMockModel('model-a');
+    const model2 = createMockModel('model-b');
 
-    const result = await securityReview(safeScript, [client1, client2]);
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage('not valid json'))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })));
+
+    const result = await securityReview(safeScript, [model1, model2], TEST_API_KEY);
 
     expect(result.approved).toBe(false);
     expect(result.details[0].approved).toBe(false);
@@ -103,16 +120,14 @@ describe('securityReview', () => {
   });
 
   it('fail-closed when approved field is missing', async () => {
-    const client1 = createMockClient(
-      JSON.stringify({ issues: ['something'] }),
-      'model-a',
-    );
-    const client2 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-b',
-    );
+    const model1 = createMockModel('model-a');
+    const model2 = createMockModel('model-b');
 
-    const result = await securityReview(safeScript, [client1, client2]);
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ issues: ['something'] })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })));
+
+    const result = await securityReview(safeScript, [model1, model2], TEST_API_KEY);
 
     expect(result.approved).toBe(false);
     expect(result.details[0].approved).toBe(false);
@@ -120,16 +135,14 @@ describe('securityReview', () => {
   });
 
   it('fail-closed on LLM error/timeout', async () => {
-    const client1 = {
-      chat: vi.fn().mockRejectedValue(new Error('Request timeout')),
-      modelName: 'model-a',
-    } as unknown as LLMClient;
-    const client2 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-b',
-    );
+    const model1 = createMockModel('model-a');
+    const model2 = createMockModel('model-b');
 
-    const result = await securityReview(safeScript, [client1, client2]);
+    mockComplete
+      .mockRejectedValueOnce(new Error('Request timeout'))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })));
+
+    const result = await securityReview(safeScript, [model1, model2], TEST_API_KEY);
 
     expect(result.approved).toBe(false);
     expect(result.details[0].approved).toBe(false);
@@ -137,24 +150,25 @@ describe('securityReview', () => {
   });
 
   it('includes previous source in messages for repairs', async () => {
-    const client1 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-a',
-    );
-    const client2 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-b',
-    );
+    const model1 = createMockModel('model-a');
+    const model2 = createMockModel('model-b');
+
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })));
 
     const previousSource = 'async function run(page) { await page.goto("https://example.com"); }';
-    await securityReview(safeScript, [client1, client2], previousSource);
+    await securityReview(safeScript, [model1, model2], TEST_API_KEY, previousSource);
 
-    // Verify both clients received messages that include previous source
-    const call1Messages = (client1.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    const call2Messages = (client2.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    // Verify both complete() calls received contexts that include previous source
+    expect(mockComplete).toHaveBeenCalledTimes(2);
 
-    const call1UserContent = call1Messages.find((m: { role: string }) => m.role === 'user')?.content;
-    const call2UserContent = call2Messages.find((m: { role: string }) => m.role === 'user')?.content;
+    const call1Context = mockComplete.mock.calls[0][1];
+    const call2Context = mockComplete.mock.calls[1][1];
+
+    // The user message in the context should contain the previous source
+    const call1UserContent = call1Context.messages[0]?.content;
+    const call2UserContent = call2Context.messages[0]?.content;
 
     expect(call1UserContent).toContain('Previous approved version');
     expect(call1UserContent).toContain(previousSource);
@@ -163,41 +177,35 @@ describe('securityReview', () => {
   });
 
   it('sends correct prompt types to each model', async () => {
-    const client1 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-a',
-    );
-    const client2 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-b',
-    );
+    const model1 = createMockModel('model-a');
+    const model2 = createMockModel('model-b');
 
-    await securityReview(safeScript, [client1, client2]);
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })));
 
-    const call1Messages = (client1.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    const call2Messages = (client2.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    await securityReview(safeScript, [model1, model2], TEST_API_KEY);
 
-    // First client gets data_flow prompt
-    const call1SystemContent = call1Messages.find((m: { role: string }) => m.role === 'system')?.content;
-    expect(call1SystemContent).toContain('DATA FLOW analysis');
+    const call1Context = mockComplete.mock.calls[0][1];
+    const call2Context = mockComplete.mock.calls[1][1];
 
-    // Second client gets capability prompt
-    const call2SystemContent = call2Messages.find((m: { role: string }) => m.role === 'system')?.content;
-    expect(call2SystemContent).toContain('CAPABILITY analysis');
+    // First model gets data_flow prompt
+    expect(call1Context.systemPrompt).toContain('DATA FLOW analysis');
+
+    // Second model gets capability prompt
+    expect(call2Context.systemPrompt).toContain('CAPABILITY analysis');
   });
 
   it('includes issues array in details', async () => {
     const issues = ['Potential data exfiltration via state keys', 'Reads password field'];
-    const client1 = createMockClient(
-      JSON.stringify({ approved: false, issues }),
-      'model-a',
-    );
-    const client2 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-b',
-    );
+    const model1 = createMockModel('model-a');
+    const model2 = createMockModel('model-b');
 
-    const result = await securityReview(safeScript, [client1, client2]);
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: false, issues })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })));
+
+    const result = await securityReview(safeScript, [model1, model2], TEST_API_KEY);
 
     expect(result.details[0].issues).toEqual(issues);
     expect(result.details[0].model).toBe('model-a');
@@ -205,23 +213,21 @@ describe('securityReview', () => {
     expect(result.details[1].model).toBe('model-b');
   });
 
-  it('calls LLM with temperature 0 and jsonMode true', async () => {
-    const client1 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-a',
-    );
-    const client2 = createMockClient(
-      JSON.stringify({ approved: true, issues: [] }),
-      'model-b',
-    );
+  it('passes model and apiKey to complete()', async () => {
+    const model1 = createMockModel('model-a');
+    const model2 = createMockModel('model-b');
 
-    await securityReview(safeScript, [client1, client2]);
+    mockComplete
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })))
+      .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })));
 
-    const call1Opts = (client1.chat as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    const call2Opts = (client2.chat as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    await securityReview(safeScript, [model1, model2], TEST_API_KEY);
 
-    expect(call1Opts).toEqual({ temperature: 0, jsonMode: true });
-    expect(call2Opts).toEqual({ temperature: 0, jsonMode: true });
+    // Verify correct model and apiKey passed to each call
+    expect(mockComplete.mock.calls[0][0]).toBe(model1);
+    expect(mockComplete.mock.calls[0][2]).toEqual({ apiKey: TEST_API_KEY });
+    expect(mockComplete.mock.calls[1][0]).toBe(model2);
+    expect(mockComplete.mock.calls[1][2]).toEqual({ apiKey: TEST_API_KEY });
   });
 });
 

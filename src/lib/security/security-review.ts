@@ -1,5 +1,6 @@
+import { complete } from '@mariozechner/pi-ai';
+import type { Context, Message, UserMessage, AssistantMessage } from '@mariozechner/pi-ai';
 import type { ReviewDetail } from '../../types';
-import type { LLMClient } from '../llm-client';
 import { buildReviewMessages } from './review-prompts';
 
 export interface SecurityReviewResult {
@@ -8,19 +9,53 @@ export interface SecurityReviewResult {
 }
 
 /**
+ * Convert the messages array from buildReviewMessages into a pi-ai Context.
+ */
+function toContext(
+  rawMessages: Array<{ role: string; content: string }>,
+): Context {
+  const systemPrompt = rawMessages
+    .filter((m) => m.role === 'system')
+    .map((m) => m.content)
+    .join('\n');
+
+  const messages: Message[] = rawMessages
+    .filter((m) => m.role !== 'system')
+    .map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+      timestamp: Date.now(),
+    })) as UserMessage[];
+
+  return { systemPrompt, messages };
+}
+
+/**
+ * Extract the text content from a pi-ai AssistantMessage.
+ */
+function extractText(result: AssistantMessage): string {
+  if (!result.content || !Array.isArray(result.content)) return '';
+  return result.content
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map((part) => part.text)
+    .join('');
+}
+
+/**
  * Run dual-model security review on a script.
  * Both models must approve. Fail-closed on any error.
  */
 export async function securityReview(
   source: string,
-  clients: [LLMClient, LLMClient],
+  models: [any, any],
+  apiKey: string,
   previousApprovedSource?: string,
 ): Promise<SecurityReviewResult> {
-  const [client1, client2] = clients;
+  const [model1, model2] = models;
 
   const [result1, result2] = await Promise.all([
-    runSingleReview(source, client1, 'data_flow', previousApprovedSource),
-    runSingleReview(source, client2, 'capability', previousApprovedSource),
+    runSingleReview(source, model1, apiKey, 'data_flow', previousApprovedSource),
+    runSingleReview(source, model2, apiKey, 'capability', previousApprovedSource),
   ]);
 
   return {
@@ -31,31 +66,30 @@ export async function securityReview(
 
 async function runSingleReview(
   source: string,
-  client: LLMClient,
+  model: any,
+  apiKey: string,
   promptType: 'data_flow' | 'capability',
   previousApprovedSource?: string,
 ): Promise<ReviewDetail> {
   const messages = buildReviewMessages(source, promptType, previousApprovedSource);
+  const context = toContext(messages);
 
   try {
-    const response = await client.chat(messages, {
-      temperature: 0,
-      jsonMode: true,
-    });
-
-    const parsed = JSON.parse(response);
+    const result = await complete(model, context, { apiKey });
+    const responseText = extractText(result);
+    const parsed = JSON.parse(responseText);
 
     // Validate response shape
     if (typeof parsed.approved !== 'boolean') {
       return {
-        model: client.modelName,
+        model: model.id,
         approved: false, // fail-closed: malformed response = rejection
         issues: ['Malformed review response: missing approved field'],
       };
     }
 
     return {
-      model: client.modelName,
+      model: model.id,
       approved: parsed.approved,
       issues: Array.isArray(parsed.issues) ? parsed.issues : [],
     };
@@ -63,7 +97,7 @@ async function runSingleReview(
     // Fail-closed: any error = rejection
     const message = err instanceof Error ? err.message : String(err);
     return {
-      model: client.modelName,
+      model: model.id,
       approved: false,
       issues: [`Review error: ${message}`],
     };
