@@ -40,6 +40,18 @@ export function openDB(): Promise<IDBDatabase> {
         llm.createIndex('by_created', 'createdAt');
         llm.createIndex('by_task', ['taskId', 'createdAt']);
       }
+      if (old < 2) {
+        const recordings = db.createObjectStore('recordings', { keyPath: 'id' });
+        recordings.createIndex('by_started', 'startedAt');
+
+        const steps = db.createObjectStore('recording_steps', { keyPath: 'id' });
+        steps.createIndex('by_recording_seq', ['recordingId', 'sequenceIndex']);
+        steps.createIndex('by_recording', 'recordingId');
+
+        const snapshots = db.createObjectStore('recording_page_snapshots', { keyPath: 'id' });
+        snapshots.createIndex('by_recording_key', ['recordingId', 'snapshotKey']);
+        snapshots.createIndex('by_recording', 'recordingId');
+      }
     };
   });
 }

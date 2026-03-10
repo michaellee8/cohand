@@ -18,7 +18,7 @@ describe('openDB', () => {
     expect(stores).toContain('state_snapshots');
     expect(stores).toContain('notifications');
     expect(stores).toContain('llm_usage');
-    expect(stores.length).toBe(7);
+    expect(stores.length).toBe(10);
     db.close();
   });
 
@@ -64,6 +64,14 @@ describe('openDB', () => {
     const store = tx.objectStore('llm_usage');
     expect(store.indexNames.contains('by_created')).toBe(true);
     expect(store.indexNames.contains('by_task')).toBe(true);
+    db.close();
+  });
+
+  it('creates recording stores in v2', async () => {
+    const db = await openDB();
+    expect(db.objectStoreNames.contains('recordings')).toBe(true);
+    expect(db.objectStoreNames.contains('recording_steps')).toBe(true);
+    expect(db.objectStoreNames.contains('recording_page_snapshots')).toBe(true);
     db.close();
   });
 
