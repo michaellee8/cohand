@@ -1,8 +1,8 @@
-import type { ScriptRPC, ScriptRPCResult } from '../types';
+import type { ScriptRPC, ScriptRPCResult, ScriptRPCErrorType } from '../types';
 
 export type RPCMethodHandler = (
   rpc: ScriptRPC,
-) => Promise<{ ok: true; value?: unknown } | { ok: false; error: { type: string; message: string } }>;
+) => Promise<{ ok: true; value?: unknown } | { ok: false; error: { type: ScriptRPCErrorType; message: string } }>;
 
 export class RPCHandler {
   private methods = new Map<string, RPCMethodHandler>();

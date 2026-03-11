@@ -8,7 +8,7 @@ const TOKEN_STORAGE_KEY = 'remote_auth_token';
 export async function getOrCreateToken(): Promise<string> {
   const result = await chrome.storage.local.get(TOKEN_STORAGE_KEY);
   if (result[TOKEN_STORAGE_KEY]) {
-    return result[TOKEN_STORAGE_KEY];
+    return result[TOKEN_STORAGE_KEY] as string;
   }
 
   // Generate a new token

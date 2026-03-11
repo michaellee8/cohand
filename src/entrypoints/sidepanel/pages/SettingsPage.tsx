@@ -185,7 +185,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                         Cancel
                       </button>
                       <button
-                        onClick={() => { importCodexAuth(pasteJsonInput); setPasteJsonInput(''); setShowPasteJson(false); }}
+                        onClick={async () => { await importCodexAuth(pasteJsonInput); setPasteJsonInput(''); setShowPasteJson(false); }}
                         disabled={!pasteJsonInput.trim()}
                         className="flex-1 bg-blue-500 text-white rounded-lg py-1 text-xs disabled:opacity-50"
                       >

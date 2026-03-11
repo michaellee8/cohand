@@ -3,6 +3,13 @@ import type { AssistantMessage } from '@mariozechner/pi-ai';
 import type { Settings } from '../types';
 import type { LlmUsageRecord } from '../types/notification';
 import { CODEX_CLIENT_ID, CODEX_TOKEN_URL } from '../constants';
+import {
+  getEncryptedTokens,
+  getEncryptionKeyEncoded,
+  getCodexOAuthTokens,
+  setCodexOAuthTokens,
+} from './storage';
+import { importKey, encrypt, decrypt } from './crypto';
 
 // ---------------------------------------------------------------------------
 // Local Model type (avoids importing the complex generic Model<TApi> from pi-ai)
@@ -179,7 +186,11 @@ export function extractAccountId(accessToken: string): string | undefined {
     const parts = accessToken.split('.');
     if (parts.length < 2) return undefined;
     const payload = JSON.parse(atob(parts[1]));
-    return payload.chatgpt_account_id ?? undefined;
+    return (
+      payload.chatgpt_account_id ??
+      payload['https://api.openai.com/auth']?.chatgpt_account_id ??
+      undefined
+    );
   } catch {
     return undefined;
   }
@@ -264,4 +275,58 @@ export async function getCodexApiKey(
 
   const newCreds = await refreshPromise;
   return newCreds.access;
+}
+
+// ---------------------------------------------------------------------------
+// resolveApiKey
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the API key for the current provider settings.
+ *
+ * - For `chatgpt-subscription`: loads codex OAuth tokens from encrypted
+ *   storage, checks expiry, refreshes if needed, and returns the access token.
+ * - For other providers: loads and decrypts the API key from encryptedTokens.
+ */
+export async function resolveApiKey(settings: Settings): Promise<string> {
+  if (settings.llmProvider === 'chatgpt-subscription') {
+    return getCodexApiKey(
+      async () => {
+        const encrypted = await getCodexOAuthTokens();
+        if (!encrypted) return null;
+        const keyEncoded = await getEncryptionKeyEncoded();
+        if (!keyEncoded) return null;
+        const key = await importKey(keyEncoded);
+        return {
+          access: await decrypt(key, encrypted.access),
+          refresh: await decrypt(key, encrypted.refresh),
+          expires: encrypted.expires,
+          accountId: encrypted.accountId,
+        };
+      },
+      async (creds: OAuthCredentials) => {
+        const keyEncoded = await getEncryptionKeyEncoded();
+        if (!keyEncoded) throw new Error('Encryption key not found');
+        const key = await importKey(keyEncoded);
+        await setCodexOAuthTokens({
+          access: await encrypt(key, creds.access),
+          refresh: await encrypt(key, creds.refresh),
+          expires: creds.expires,
+          accountId: creds.accountId,
+        });
+      },
+    );
+  }
+
+  // For API key providers (openai, anthropic, gemini, custom)
+  const tokens = await getEncryptedTokens();
+  const keyEncoded = await getEncryptionKeyEncoded();
+  if (keyEncoded && tokens.apiKey) {
+    const key = await importKey(keyEncoded);
+    return decrypt(key, tokens.apiKey);
+  }
+  if (tokens.apiKey) {
+    return tokens.apiKey;
+  }
+  throw new Error('No API key configured. Go to Settings to add one.');
 }

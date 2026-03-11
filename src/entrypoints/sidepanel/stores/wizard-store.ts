@@ -1,10 +1,9 @@
 import { create } from 'zustand';
-import { resolveModel, getSecurityReviewModels } from '../../../lib/pi-ai-bridge';
+import { resolveModel, getSecurityReviewModels, resolveApiKey } from '../../../lib/pi-ai-bridge';
 import { generateScript, type ExplorationResult } from '../../../lib/explorer';
 import { securityReview } from '../../../lib/security/security-review';
 import { validateAST } from '../../../lib/security/ast-validator';
-import { getSettings, getEncryptedTokens, getEncryptionKeyEncoded } from '../../../lib/storage';
-import { decrypt, importKey } from '../../../lib/crypto';
+import { getSettings } from '../../../lib/storage';
 
 export type WizardStep = 'describe' | 'domains' | 'observe' | 'review' | 'test' | 'schedule';
 
@@ -41,22 +40,8 @@ const STEPS: WizardStep[] = ['describe', 'domains', 'observe', 'review', 'test',
  */
 async function initLLM(): Promise<{ model: any; apiKey: string }> {
   const settings = await getSettings();
-  const tokens = await getEncryptedTokens();
-
-  let token = '';
-  const keyEncoded = await getEncryptionKeyEncoded();
-  if (keyEncoded && tokens.apiKey) {
-    const key = await importKey(keyEncoded);
-    token = await decrypt(key, tokens.apiKey);
-  } else if (tokens.apiKey) {
-    token = tokens.apiKey;
-  }
-
-  if (!token) {
-    throw new Error('No API key configured. Go to Settings to add one.');
-  }
-
-  return { model: resolveModel(settings), apiKey: token };
+  const apiKey = await resolveApiKey(settings);
+  return { model: resolveModel(settings), apiKey };
 }
 
 export const useWizardStore = create<WizardState>((set, get) => ({

@@ -1,8 +1,7 @@
 import { create } from 'zustand';
 import { stream as piStream, complete as piComplete } from '@mariozechner/pi-ai';
-import { resolveModel } from '../../../lib/pi-ai-bridge';
-import { getSettings, getEncryptedTokens, getEncryptionKeyEncoded } from '../../../lib/storage';
-import { decrypt, importKey } from '../../../lib/crypto';
+import { resolveModel, resolveApiKey } from '../../../lib/pi-ai-bridge';
+import { getSettings } from '../../../lib/storage';
 import type { RecordingSession } from '../../../types/recording';
 import { buildRecordingGenerationMessages, parseGenerationOutput } from '../../../lib/recording/recording-prompts';
 
@@ -50,24 +49,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   initClient: async () => {
     try {
       const settings = await getSettings();
-      const tokens = await getEncryptedTokens();
-
-      // Decrypt token
-      let token = '';
-      const keyEncoded = await getEncryptionKeyEncoded();
-      if (keyEncoded && tokens.apiKey) {
-        const key = await importKey(keyEncoded);
-        token = await decrypt(key, tokens.apiKey);
-      } else if (tokens.apiKey) {
-        // Unencrypted fallback (first setup before encryption)
-        token = tokens.apiKey;
-      }
-
-      if (!token) {
-        set({ error: 'No API key configured. Go to Settings to add one.' });
-        return;
-      }
-
+      const token = await resolveApiKey(settings);
       const model = resolveModel(settings);
       set({ model, apiKey: token, error: null });
     } catch (err: any) {
@@ -77,10 +59,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendMessage: async (content: string) => {
     const { model, apiKey, messages } = get();
-    if (!model || !apiKey) {
-      set({ error: 'LLM not initialized' });
-      return;
-    }
 
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -88,6 +66,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       content,
       timestamp: Date.now(),
     };
+
+    if (!model || !apiKey) {
+      set({ messages: [...messages, userMessage], error: 'LLM not initialized' });
+      return;
+    }
 
     const assistantMessage: ChatMessage = {
       id: `msg-${Date.now()}-assistant`,

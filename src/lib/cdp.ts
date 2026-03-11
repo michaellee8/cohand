@@ -57,7 +57,7 @@ export class CDPManager {
    * Send a CDP command to a tab.
    * Checks epoch before sending to detect stale navigations.
    */
-  async send(tabId: number, method: string, params?: object): Promise<unknown> {
+  async send(tabId: number, method: string, params?: Record<string, unknown>): Promise<unknown> {
     const state = this.tabs.get(tabId);
     if (!state) throw new Error(`Tab ${tabId} not attached`);
 

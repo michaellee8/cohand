@@ -154,7 +154,7 @@ describe('validateImport', () => {
 
   it('rejects missing task', async () => {
     const bundle = makeBundle();
-    delete (bundle as Record<string, unknown>).task;
+    delete (bundle as unknown as Record<string, unknown>).task;
     const result = await validateImport(JSON.stringify(bundle));
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('task'))).toBe(true);
@@ -162,7 +162,7 @@ describe('validateImport', () => {
 
   it('rejects missing scripts', async () => {
     const bundle = makeBundle();
-    delete (bundle as Record<string, unknown>).scripts;
+    delete (bundle as unknown as Record<string, unknown>).scripts;
     const result = await validateImport(JSON.stringify(bundle));
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('scripts'))).toBe(true);
@@ -271,8 +271,21 @@ describe('prepareForImport', () => {
     });
     const prepared = prepareForImport(bundle);
     for (const script of prepared.scripts) {
-      expect(script.id).toContain(bundle.task.id);
+      // Script ID should reference the NEW task ID, not the old one
+      expect(script.id).toContain(prepared.task.id);
       expect(script.id).toContain(`:v${script.version}`);
+      expect(script.id).not.toContain(bundle.task.id);
+    }
+  });
+
+  it('updates script taskId to reference new task ID', () => {
+    const bundle = makeBundle({
+      scripts: [makeScript({ version: 1 }), makeScript({ version: 2, id: 'task-abc:v2' })],
+    });
+    const prepared = prepareForImport(bundle);
+    for (const script of prepared.scripts) {
+      expect(script.taskId).toBe(prepared.task.id);
+      expect(script.taskId).not.toBe(bundle.task.id);
     }
   });
 });

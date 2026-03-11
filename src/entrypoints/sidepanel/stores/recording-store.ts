@@ -40,17 +40,28 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
 
     try {
       await chrome.runtime.sendMessage({ type: 'START_RECORDING', tabId });
-      await chrome.tabs.sendMessage(tabId, { type: 'ACTIVATE_RECORDING' });
     } catch (err: any) {
       set({ isRecording: false, session: null, error: err.message });
+      return;
+    }
+    // Content script activation is best-effort — recording still works
+    // even if the content script isn't loaded (e.g. on restricted pages).
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: 'ACTIVATE_RECORDING' });
+    } catch {
+      // Content script not available — recording proceeds without it
     }
   },
 
   stopRecording: async () => {
     const { session } = get();
     if (!session) return;
+    // Deactivate content script (best-effort, may fail on restricted pages)
     try {
       await chrome.tabs.sendMessage(session.activeTabId, { type: 'DEACTIVATE_RECORDING' });
+    } catch { /* content script not available */ }
+    // Notify service worker
+    try {
       await chrome.runtime.sendMessage({ type: 'STOP_RECORDING', sessionId: session.id });
     } catch { /* best effort */ }
     set(state => ({

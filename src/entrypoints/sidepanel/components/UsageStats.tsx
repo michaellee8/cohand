@@ -6,7 +6,7 @@ export function UsageStats() {
 
   useEffect(() => {
     // Fetch via service worker message
-    chrome.runtime.sendMessage({ type: 'GET_USAGE_SUMMARY', days: 30 })
+    chrome.runtime.sendMessage({ type: 'GET_USAGE_SUMMARY', sinceDaysAgo: 30 })
       .then(response => setSummary(response.summary))
       .catch(() => {});
   }, []);

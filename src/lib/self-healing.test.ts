@@ -242,7 +242,7 @@ describe('selfHeal', () => {
     // Should try LKG (v2), then previous approved versions (v1 only, v4 not approved)
     // v3 is active, v2 is LKG, v4 is not approved => only v1 is a valid previous version
     const triedVersions = executeScript.mock.calls.map(
-      (call: [ScriptVersion]) => call[0].version,
+      (call: any[]) => (call[0] as ScriptVersion).version,
     );
     expect(triedVersions).not.toContain(4);
   });

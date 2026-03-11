@@ -24,4 +24,7 @@ export type ScriptRPCErrorType =
   | 'SelectorNotFound'
   | 'DeadlineExceeded'
   | 'OwnerDisconnected'
-  | 'DomainDisallowed';
+  | 'DomainDisallowed'
+  | 'SensitivePage'
+  | 'ReadLimitExceeded'
+  | 'Unknown';

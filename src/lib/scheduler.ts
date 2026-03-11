@@ -63,14 +63,14 @@ export async function syncSchedules(tasks: Task[]): Promise<void> {
  * The popup loads sidepanel.html which has full LLM capability.
  */
 export async function openTaskExecutionWindow(taskId: string): Promise<number | undefined> {
-  const window = await chrome.windows.create({
+  const win = await chrome.windows.create({
     type: 'popup',
     url: chrome.runtime.getURL(`sidepanel.html?taskId=${encodeURIComponent(taskId)}&mode=execute`),
     width: 500,
     height: 768,
     focused: false,
   });
-  return window.id;
+  return win?.id;
 }
 
 /**

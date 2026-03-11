@@ -4,7 +4,7 @@ import type { UsageSummary } from './llm-usage';
 // All messages that can be sent to the service worker
 export type Message =
   // Task management
-  | { type: 'CREATE_TASK'; task: Task; scriptSource?: string }
+  | { type: 'CREATE_TASK'; task: Task; scriptSource?: string; astValidationPassed?: boolean; securityReviewPassed?: boolean; reviewDetails?: import('../types/script').ReviewDetail[] }
   | { type: 'UPDATE_TASK'; task: Task }
   | { type: 'DELETE_TASK'; taskId: string }
   | { type: 'GET_TASKS' }

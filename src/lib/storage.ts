@@ -8,7 +8,7 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export async function getSettings(): Promise<Settings> {
-  const result = await chrome.storage.local.get('settings');
+  const result = await chrome.storage.local.get('settings') as { settings?: Settings };
   return result.settings ?? DEFAULT_SETTINGS;
 }
 
@@ -17,7 +17,7 @@ export async function setSettings(settings: Settings): Promise<void> {
 }
 
 export async function getDomainPermissions(): Promise<DomainPermission[]> {
-  const result = await chrome.storage.local.get('domainPermissions');
+  const result = await chrome.storage.local.get('domainPermissions') as { domainPermissions?: DomainPermission[] };
   return result.domainPermissions ?? [];
 }
 
@@ -36,7 +36,7 @@ export async function removeDomainPermission(domain: string): Promise<void> {
 }
 
 export async function getStorageSchemaVersion(): Promise<number> {
-  const result = await chrome.storage.local.get('_storageSchemaVersion');
+  const result = await chrome.storage.local.get('_storageSchemaVersion') as { _storageSchemaVersion?: number };
   return result._storageSchemaVersion ?? 0;
 }
 
@@ -55,7 +55,7 @@ export async function migrateStorage(): Promise<void> {
 
 // Token storage (encrypted)
 export async function getEncryptedTokens(): Promise<EncryptedTokens> {
-  const result = await chrome.storage.local.get('encryptedTokens');
+  const result = await chrome.storage.local.get('encryptedTokens') as { encryptedTokens?: EncryptedTokens };
   return result.encryptedTokens ?? {};
 }
 
@@ -65,7 +65,7 @@ export async function setEncryptedTokens(tokens: EncryptedTokens): Promise<void>
 
 // Encryption key storage
 export async function getEncryptionKeyEncoded(): Promise<string | null> {
-  const result = await chrome.storage.local.get('_encryptionKey');
+  const result = await chrome.storage.local.get('_encryptionKey') as { _encryptionKey?: string };
   return result._encryptionKey ?? null;
 }
 
@@ -75,7 +75,7 @@ export async function setEncryptionKeyEncoded(key: string): Promise<void> {
 
 // Codex OAuth token storage
 export async function getCodexOAuthTokens(): Promise<EncryptedCodexOAuth | null> {
-  const result = await chrome.storage.local.get('codexOAuthTokens');
+  const result = await chrome.storage.local.get('codexOAuthTokens') as { codexOAuthTokens?: EncryptedCodexOAuth };
   return result.codexOAuthTokens ?? null;
 }
 

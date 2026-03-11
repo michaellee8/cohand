@@ -3,13 +3,26 @@ import type { Settings } from '../types';
 import type { LlmUsageRecord } from '../types/notification';
 
 // vi.hoisted ensures these are available when the mock factory runs
-const { mockGetModel } = vi.hoisted(() => {
+const { mockGetModel, mockGetCodexOAuthTokens, mockGetEncryptionKeyEncoded, mockGetEncryptedTokens, mockSetCodexOAuthTokens } = vi.hoisted(() => {
   const mockGetModel = vi.fn();
-  return { mockGetModel };
+  const mockGetCodexOAuthTokens = vi.fn();
+  const mockGetEncryptionKeyEncoded = vi.fn();
+  const mockGetEncryptedTokens = vi.fn();
+  const mockSetCodexOAuthTokens = vi.fn();
+  return { mockGetModel, mockGetCodexOAuthTokens, mockGetEncryptionKeyEncoded, mockGetEncryptedTokens, mockSetCodexOAuthTokens };
 });
 
 vi.mock('@mariozechner/pi-ai', () => ({
   getModel: mockGetModel,
+}));
+
+vi.mock('./storage', () => ({
+  getCodexOAuthTokens: mockGetCodexOAuthTokens,
+  getEncryptionKeyEncoded: mockGetEncryptionKeyEncoded,
+  getEncryptedTokens: mockGetEncryptedTokens,
+  setCodexOAuthTokens: mockSetCodexOAuthTokens,
+  setEncryptionKeyEncoded: vi.fn(),
+  setEncryptedTokens: vi.fn(),
 }));
 
 import {
@@ -20,9 +33,11 @@ import {
   extractAccountId,
   refreshCodexToken,
   getCodexApiKey,
+  resolveApiKey,
   type ModelLike,
   type OAuthCredentials,
 } from './pi-ai-bridge';
+import { generateEncryptionKey, exportKey, importKey, encrypt } from './crypto';
 
 function makeSettings(overrides: Partial<Settings> = {}): Settings {
   return {
@@ -321,6 +336,35 @@ describe('extractAccountId', () => {
     const result = extractAccountId('');
     expect(result).toBeUndefined();
   });
+
+  it('extracts from nested https://api.openai.com/auth claim', () => {
+    const payload = {
+      sub: 'google-oauth2|12345',
+      'https://api.openai.com/auth': {
+        chatgpt_account_id: 'acct_nested_456',
+        chatgpt_user_id: 'user_xyz',
+      },
+    };
+    const base64Payload = btoa(JSON.stringify(payload));
+    const fakeJwt = `eyJhbGciOiJSUzI1NiJ9.${base64Payload}.fakesig`;
+
+    const result = extractAccountId(fakeJwt);
+    expect(result).toBe('acct_nested_456');
+  });
+
+  it('prefers top-level chatgpt_account_id over nested', () => {
+    const payload = {
+      chatgpt_account_id: 'acct_top_level',
+      'https://api.openai.com/auth': {
+        chatgpt_account_id: 'acct_nested',
+      },
+    };
+    const base64Payload = btoa(JSON.stringify(payload));
+    const fakeJwt = `eyJhbGciOiJSUzI1NiJ9.${base64Payload}.fakesig`;
+
+    const result = extractAccountId(fakeJwt);
+    expect(result).toBe('acct_top_level');
+  });
 });
 
 describe('refreshCodexToken', () => {
@@ -515,5 +559,108 @@ describe('getCodexApiKey', () => {
     const saveEncrypted = vi.fn();
 
     await expect(getCodexApiKey(loadDecrypted, saveEncrypted)).rejects.toThrow();
+  });
+});
+
+describe('resolveApiKey', () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('returns decrypted API key for openai provider', async () => {
+    const key = await generateEncryptionKey();
+    const keyEncoded = await exportKey(key);
+    const encryptedApiKey = await encrypt(key, 'sk-test-key-123');
+
+    mockGetEncryptedTokens.mockResolvedValue({ apiKey: encryptedApiKey });
+    mockGetEncryptionKeyEncoded.mockResolvedValue(keyEncoded);
+
+    const settings = makeSettings({ llmProvider: 'openai' });
+    const result = await resolveApiKey(settings);
+    expect(result).toBe('sk-test-key-123');
+  });
+
+  it('returns unencrypted API key when no encryption key exists', async () => {
+    mockGetEncryptedTokens.mockResolvedValue({ apiKey: 'sk-plain-key' });
+    mockGetEncryptionKeyEncoded.mockResolvedValue(null);
+
+    const settings = makeSettings({ llmProvider: 'openai' });
+    const result = await resolveApiKey(settings);
+    expect(result).toBe('sk-plain-key');
+  });
+
+  it('throws when no API key configured for standard provider', async () => {
+    mockGetEncryptedTokens.mockResolvedValue({});
+    mockGetEncryptionKeyEncoded.mockResolvedValue(null);
+
+    const settings = makeSettings({ llmProvider: 'openai' });
+    await expect(resolveApiKey(settings)).rejects.toThrow('No API key configured');
+  });
+
+  it('returns codex access token for chatgpt-subscription when not expired', async () => {
+    const key = await generateEncryptionKey();
+    const keyEncoded = await exportKey(key);
+    const encryptedAccess = await encrypt(key, 'valid-codex-access');
+    const encryptedRefresh = await encrypt(key, 'valid-codex-refresh');
+
+    mockGetCodexOAuthTokens.mockResolvedValue({
+      access: encryptedAccess,
+      refresh: encryptedRefresh,
+      expires: Date.now() + 60_000, // not expired
+      accountId: 'acct_123',
+    });
+    mockGetEncryptionKeyEncoded.mockResolvedValue(keyEncoded);
+
+    const settings = makeSettings({ llmProvider: 'chatgpt-subscription' });
+    const result = await resolveApiKey(settings);
+    expect(result).toBe('valid-codex-access');
+  });
+
+  it('throws when no codex credentials for chatgpt-subscription', async () => {
+    mockGetCodexOAuthTokens.mockResolvedValue(null);
+    mockGetEncryptionKeyEncoded.mockResolvedValue(null);
+
+    const settings = makeSettings({ llmProvider: 'chatgpt-subscription' });
+    await expect(resolveApiKey(settings)).rejects.toThrow('No Codex OAuth credentials found');
+  });
+
+  it('refreshes expired codex token for chatgpt-subscription', async () => {
+    const key = await generateEncryptionKey();
+    const keyEncoded = await exportKey(key);
+    const encryptedAccess = await encrypt(key, 'old-access');
+    const encryptedRefresh = await encrypt(key, 'old-refresh');
+
+    mockGetCodexOAuthTokens.mockResolvedValue({
+      access: encryptedAccess,
+      refresh: encryptedRefresh,
+      expires: 0, // expired (as set by importCodexAuth)
+      accountId: 'acct_123',
+    });
+    mockGetEncryptionKeyEncoded.mockResolvedValue(keyEncoded);
+    mockSetCodexOAuthTokens.mockResolvedValue(undefined);
+
+    const payload = { chatgpt_account_id: 'acct_123' };
+    const base64Payload = btoa(JSON.stringify(payload));
+    const newAccess = `eyJhbGciOiJSUzI1NiJ9.${base64Payload}.fakesig`;
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        access_token: newAccess,
+        refresh_token: 'new-refresh',
+        expires_in: 3600,
+      }),
+    });
+
+    const settings = makeSettings({ llmProvider: 'chatgpt-subscription' });
+    const result = await resolveApiKey(settings);
+    expect(result).toBe(newAccess);
+    expect(mockSetCodexOAuthTokens).toHaveBeenCalledOnce();
   });
 });

@@ -29,7 +29,7 @@ export function TabBar({ activeTab, onTabChange, onSettingsClick, unreadCount }:
         onClick={() => onTabChange('tasks')}
       >
         Tasks
-        {unreadCount && unreadCount > 0 ? (
+        {unreadCount != null && unreadCount > 0 ? (
           <span className="absolute -top-0.5 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>

@@ -84,6 +84,7 @@ export default defineBackground(() => {
   let recordingPort: chrome.runtime.Port | null = null;
 
   let db: IDBDatabase;
+  let initPromise: Promise<void>;
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -677,10 +678,11 @@ export default defineBackground(() => {
   // ---------------------------------------------------------------------------
   // Start listening
   // ---------------------------------------------------------------------------
-  router.listen();
 
-  // Initialize async
-  init();
+  // Initialize async — gate message handling until init completes
+  initPromise = init();
+  router.setGate(initPromise);
+  router.listen();
 });
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import {
   getDomainPermissions, addDomainPermission, removeDomainPermission,
   getEncryptedTokens, setEncryptedTokens,
   getEncryptionKeyEncoded, setEncryptionKeyEncoded,
-  setCodexOAuthTokens,
+  getCodexOAuthTokens, setCodexOAuthTokens,
 } from '../../../lib/storage';
 import { generateEncryptionKey, exportKey, importKey, encrypt, decrypt } from '../../../lib/crypto';
 
@@ -48,7 +48,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         getDomainPermissions(),
         getEncryptedTokens(),
       ]);
-      const codexOAuth = (await chrome.storage.local.get('codexOAuthTokens')).codexOAuthTokens;
+      const codexOAuth = await getCodexOAuthTokens();
       set({
         settings,
         domainPermissions: permissions,

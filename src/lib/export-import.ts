@@ -113,12 +113,13 @@ export async function validateImport(json: string): Promise<ImportValidationResu
  * Imported scripts must be re-reviewed before they can run.
  */
 export function prepareForImport(bundle: TaskExportBundle): TaskExportBundle {
+  const newTaskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   return {
     ...bundle,
     task: {
       ...bundle.task,
       // Generate new ID to avoid conflicts
-      id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: newTaskId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     },
@@ -127,8 +128,9 @@ export function prepareForImport(bundle: TaskExportBundle): TaskExportBundle {
       // Reset security review — must be re-reviewed
       securityReviewPassed: false,
       reviewDetails: [],
-      // Update script ID to reference original task id for traceability
-      id: `${bundle.task.id}:v${s.version}`,
+      // Update script references to new task ID
+      id: `${newTaskId}:v${s.version}`,
+      taskId: newTaskId,
     })),
   };
 }

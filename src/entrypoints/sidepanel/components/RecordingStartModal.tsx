@@ -19,7 +19,10 @@ export function RecordingStartModal({ onClose }: Props) {
   const handleStart = async () => {
     setStarting(true);
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      // Find the active non-extension tab to record.
+      // Filter out chrome-extension:// pages (e.g. side panel opened as tab in tests).
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = tabs.find(t => t.url && !t.url.startsWith('chrome-extension://')) ?? tabs[0];
       if (!tab?.id) throw new Error('No active tab');
       await startRecording(tab.id);
       onClose();

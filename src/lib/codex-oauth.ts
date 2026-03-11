@@ -217,7 +217,7 @@ export async function cleanupStaleOAuthState(): Promise<void> {
   // Clean PKCE state from storage if it's older than 10 minutes
   const result = await chrome.storage.local.get(['pkceState', 'pkceTimestamp']);
   if (result.pkceTimestamp) {
-    const age = Date.now() - result.pkceTimestamp;
+    const age = Date.now() - Number(result.pkceTimestamp);
     if (age > PKCE_STATE_MAX_AGE_MS) {
       await chrome.storage.local.remove(['pkceState', 'pkceTimestamp', 'pkceVerifier']);
     }

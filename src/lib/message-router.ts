@@ -11,15 +11,22 @@ type HandlerMap = {
 
 export class MessageRouter {
   private handlers: HandlerMap = {};
+  private gate: Promise<void> = Promise.resolve();
 
   on<T extends Message['type']>(type: T, handler: MessageHandler<T>): void {
     (this.handlers as any)[type] = handler;
+  }
+
+  /** Set a gate promise that must resolve before any message is handled. */
+  setGate(promise: Promise<void>): void {
+    this.gate = promise;
   }
 
   async handleMessage(
     message: Message,
     sender: chrome.runtime.MessageSender,
   ): Promise<unknown> {
+    await this.gate;
     const handler = this.handlers[message.type];
     if (!handler) {
       console.warn(`[Cohand] No handler for message type: ${message.type}`);
