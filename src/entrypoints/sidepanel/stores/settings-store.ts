@@ -5,6 +5,7 @@ import {
   getDomainPermissions, addDomainPermission, removeDomainPermission,
   getEncryptedTokens, setEncryptedTokens,
   getEncryptionKeyEncoded, setEncryptionKeyEncoded,
+  setCodexOAuthTokens,
 } from '../../../lib/storage';
 import { generateEncryptionKey, exportKey, importKey, encrypt, decrypt } from '../../../lib/crypto';
 
@@ -26,6 +27,7 @@ interface SettingsState {
   removeDomain: (domain: string) => Promise<void>;
   startCodexLogin: () => Promise<void>;
   logoutCodex: () => Promise<void>;
+  importCodexAuth: (json: string) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -136,5 +138,42 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   logoutCodex: async () => {
     await chrome.runtime.sendMessage({ type: 'LOGOUT_CODEX' });
     set({ codexConnected: false, codexAccountId: null, hasApiKey: false });
+  },
+
+  importCodexAuth: async (json: string) => {
+    set({ saving: true, error: null });
+    try {
+      const parsed = JSON.parse(json);
+      const tokens = parsed?.tokens;
+      if (!tokens?.access_token || typeof tokens.access_token !== 'string') {
+        throw new Error('Invalid auth.json: missing tokens.access_token');
+      }
+      if (!tokens?.refresh_token || typeof tokens.refresh_token !== 'string') {
+        throw new Error('Invalid auth.json: missing tokens.refresh_token');
+      }
+      if (!tokens?.account_id || typeof tokens.account_id !== 'string') {
+        throw new Error('Invalid auth.json: missing tokens.account_id');
+      }
+
+      // Ensure encryption key exists
+      let keyEncoded = await getEncryptionKeyEncoded();
+      if (!keyEncoded) {
+        const cryptoKey = await generateEncryptionKey();
+        keyEncoded = await exportKey(cryptoKey);
+        await setEncryptionKeyEncoded(keyEncoded);
+      }
+
+      const key = await importKey(keyEncoded);
+      await setCodexOAuthTokens({
+        access: await encrypt(key, tokens.access_token),
+        refresh: await encrypt(key, tokens.refresh_token),
+        expires: 0, // Force refresh on first use
+        accountId: tokens.account_id,
+      });
+
+      set({ codexConnected: true, codexAccountId: tokens.account_id, hasApiKey: true, saving: false });
+    } catch (err: any) {
+      set({ saving: false, error: err.message });
+    }
   },
 }));

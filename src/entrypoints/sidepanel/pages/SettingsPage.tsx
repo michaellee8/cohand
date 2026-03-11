@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSettingsStore } from '../stores/settings-store';
 
 interface SettingsPageProps {
@@ -10,12 +10,15 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
     settings, domainPermissions, hasApiKey, loading, saving,
     codexConnected, codexAccountId,
     load, updateSettings, saveApiKey, clearApiKey, addDomain, removeDomain,
-    startCodexLogin, logoutCodex,
+    startCodexLogin, logoutCodex, importCodexAuth,
   } = useSettingsStore();
 
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [domainInput, setDomainInput] = useState('');
   const [showYoloWarning, setShowYoloWarning] = useState(false);
+  const [showPasteJson, setShowPasteJson] = useState(false);
+  const [pasteJsonInput, setPasteJsonInput] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -125,12 +128,73 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                 <button onClick={logoutCodex} className="text-xs text-red-500 hover:text-red-700">Logout</button>
               </div>
             ) : (
-              <button
-                onClick={startCodexLogin}
-                className="w-full bg-green-500 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-green-600"
-              >
-                Login with ChatGPT
-              </button>
+              <div className="space-y-3">
+                <button
+                  onClick={startCodexLogin}
+                  className="w-full bg-green-500 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-green-600"
+                >
+                  Login with ChatGPT
+                </button>
+
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <div className="flex-1 border-t border-gray-200" />
+                  <span>or</span>
+                  <div className="flex-1 border-t border-gray-200" />
+                </div>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    file.text().then(importCodexAuth);
+                    e.target.value = '';
+                  }}
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full text-sm text-blue-600 hover:text-blue-800"
+                >
+                  Import from ~/.codex/auth.json
+                </button>
+
+                {!showPasteJson ? (
+                  <button
+                    onClick={() => setShowPasteJson(true)}
+                    className="w-full text-xs text-gray-400 hover:text-gray-600"
+                  >
+                    Paste JSON manually
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <textarea
+                      value={pasteJsonInput}
+                      onChange={(e) => setPasteJsonInput(e.target.value)}
+                      placeholder='Paste contents of ~/.codex/auth.json...'
+                      rows={4}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => { setShowPasteJson(false); setPasteJsonInput(''); }}
+                        className="flex-1 text-xs text-gray-500 hover:text-gray-700 py-1"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => { importCodexAuth(pasteJsonInput); setPasteJsonInput(''); setShowPasteJson(false); }}
+                        disabled={!pasteJsonInput.trim()}
+                        className="flex-1 bg-blue-500 text-white rounded-lg py-1 text-xs disabled:opacity-50"
+                      >
+                        Import
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </section>
         )}
