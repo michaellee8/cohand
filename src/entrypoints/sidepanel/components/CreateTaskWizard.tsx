@@ -163,11 +163,11 @@ function DescribeStep() {
 }
 
 function DomainsStep() {
-  const { domains, currentTabUrl, addDomain, removeDomain, detectCurrentTab } = useWizardStore();
+  const { domains, currentTabUrl, addDomain, removeDomain } = useWizardStore();
   const [newDomain, setNewDomain] = useState('');
 
   useEffect(() => {
-    detectCurrentTab();
+    useWizardStore.getState().detectCurrentTab();
   }, []);
 
   const handleAdd = () => {
@@ -396,8 +396,10 @@ function ScheduleStep({ onComplete }: { onComplete: () => void }) {
   );
 
   const handleCreate = async () => {
-    await createTask();
-    onComplete();
+    const success = await createTask();
+    if (success) {
+      onComplete();
+    }
   };
 
   return (

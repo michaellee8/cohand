@@ -9,7 +9,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
   const {
     settings, domainPermissions, hasApiKey, loading, saving,
     codexConnected, codexAccountId,
-    load, updateSettings, saveApiKey, clearApiKey, addDomain, removeDomain,
+    updateSettings, saveApiKey, clearApiKey, addDomain, removeDomain,
     startCodexLogin, logoutCodex, importCodexAuth,
   } = useSettingsStore();
 
@@ -18,9 +18,10 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
   const [showYoloWarning, setShowYoloWarning] = useState(false);
   const [showPasteJson, setShowPasteJson] = useState(false);
   const [pasteJsonInput, setPasteJsonInput] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { useSettingsStore.getState().load(); }, []);
 
   if (loading || !settings) {
     return (
@@ -147,10 +148,16 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                   type="file"
                   accept=".json"
                   className="hidden"
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
-                    file.text().then(importCodexAuth);
+                    try {
+                      setImportError(null);
+                      const text = await file.text();
+                      await importCodexAuth(text);
+                    } catch (err: any) {
+                      setImportError(err?.message ?? String(err));
+                    }
                     e.target.value = '';
                   }}
                 />
@@ -160,6 +167,12 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                 >
                   Import from ~/.codex/auth.json
                 </button>
+
+                {importError && (
+                  <div className="px-3 py-2 bg-red-50 text-red-600 text-xs rounded-lg">
+                    {importError}
+                  </div>
+                )}
 
                 {!showPasteJson ? (
                   <button
@@ -185,7 +198,16 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                         Cancel
                       </button>
                       <button
-                        onClick={async () => { await importCodexAuth(pasteJsonInput); setPasteJsonInput(''); setShowPasteJson(false); }}
+                        onClick={async () => {
+                          try {
+                            setImportError(null);
+                            await importCodexAuth(pasteJsonInput);
+                            setPasteJsonInput('');
+                            setShowPasteJson(false);
+                          } catch (err: any) {
+                            setImportError(err?.message ?? String(err));
+                          }
+                        }}
                         disabled={!pasteJsonInput.trim()}
                         className="flex-1 bg-blue-500 text-white rounded-lg py-1 text-xs disabled:opacity-50"
                       >

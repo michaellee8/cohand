@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { resolveModel, getSecurityReviewModels, resolveApiKey } from '../../../lib/pi-ai-bridge';
+import { resolveModel, getSecurityReviewModels, resolveApiKey, type ModelLike } from '../../../lib/pi-ai-bridge';
 import { generateScript, type ExplorationResult } from '../../../lib/explorer';
 import { securityReview } from '../../../lib/security/security-review';
 import { validateAST } from '../../../lib/security/ast-validator';
@@ -27,7 +27,7 @@ interface WizardState {
   startObservation: () => Promise<void>;
   runTest: () => Promise<void>;
   setSchedule: (schedule: WizardState['schedule']) => void;
-  createTask: () => Promise<void>;
+  createTask: () => Promise<boolean>;
   nextStep: () => void;
   prevStep: () => void;
   reset: () => void;
@@ -38,7 +38,7 @@ const STEPS: WizardStep[] = ['describe', 'domains', 'observe', 'review', 'test',
 /**
  * Initialize a pi-ai model and API key from stored settings and encrypted token.
  */
-async function initLLM(): Promise<{ model: any; apiKey: string }> {
+async function initLLM(): Promise<{ model: ModelLike; apiKey: string }> {
   const settings = await getSettings();
   const apiKey = await resolveApiKey(settings);
   return { model: resolveModel(settings), apiKey };
@@ -80,7 +80,9 @@ export const useWizardStore = create<WizardState>((set, get) => ({
           domains: [url.hostname],
         });
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      set({ error: String(e) });
+    }
   },
 
   startObservation: async () => {
@@ -206,8 +208,10 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         securityReviewPassed: securityPassed,
       });
       set({ loading: false });
+      return true;
     } catch (err: unknown) {
       set({ loading: false, error: err instanceof Error ? err.message : String(err) });
+      return false;
     }
   },
 
