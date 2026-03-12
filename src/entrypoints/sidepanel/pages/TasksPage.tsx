@@ -8,13 +8,13 @@ import { CreateTaskWizard } from '../components/CreateTaskWizard';
 
 export function TasksPage() {
   const { tasks, selectedTaskId, runs, notifications, loading,
-    fetchTasks, selectTask, fetchNotifications, runTask, deleteTask, markNotificationRead } = useTasksStore();
+    fetchTasks, selectTask, runTask, deleteTask, markNotificationRead } = useTasksStore();
   const [showWizard, setShowWizard] = useState(false);
   const resetWizard = useWizardStore(state => state.reset);
 
   useEffect(() => {
-    fetchTasks();
-    fetchNotifications();
+    useTasksStore.getState().fetchTasks();
+    useTasksStore.getState().fetchNotifications();
   }, []);
 
   const handleWizardComplete = () => {

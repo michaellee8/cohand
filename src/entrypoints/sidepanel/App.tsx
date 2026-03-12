@@ -9,10 +9,9 @@ export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('chat');
   const [showSettings, setShowSettings] = useState(false);
   const unreadCount = useTasksStore(state => state.unreadCount);
-  const fetchUnreadCount = useTasksStore(state => state.fetchUnreadCount);
 
   useEffect(() => {
-    fetchUnreadCount();
+    useTasksStore.getState().fetchUnreadCount();
   }, []);
 
   if (showSettings) {

@@ -1,4 +1,10 @@
 // AES-GCM encryption for tokens at rest in chrome.storage.local
+//
+// Security note: The encryption key is stored adjacent to the ciphertext in chrome.storage.
+// This is an architectural trade-off inherent to Chrome extensions — there is no hardware
+// keystore API available. The encryption provides defense-in-depth against casual inspection
+// of storage data but does not protect against a determined attacker with extension access.
+
 const ALGO = 'AES-GCM';
 const KEY_LENGTH = 256;
 

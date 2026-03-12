@@ -7,14 +7,14 @@ import { LiveStepList } from '../components/LiveStepList';
 import { RecordingStartModal } from '../components/RecordingStartModal';
 
 export function ChatPage() {
-  const { messages, isStreaming, error, sendMessage, cancelStream, initClient } = useChatStore();
+  const { messages, isStreaming, error, sendMessage, cancelStream } = useChatStore();
   const { isRecording } = useRecordingStore();
   const [input, setInput] = useState('');
   const [showRecordModal, setShowRecordModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    initClient();
+    useChatStore.getState().initClient();
   }, []);
 
   useEffect(() => {

@@ -234,17 +234,17 @@ function DomainsStep() {
 }
 
 function ObserveStep() {
-  const { loading, generatedScript, startObservation, nextStep } = useWizardStore();
+  const { loading, generatedScript } = useWizardStore();
 
   useEffect(() => {
-    if (!generatedScript) {
-      startObservation();
+    if (!useWizardStore.getState().generatedScript) {
+      useWizardStore.getState().startObservation();
     }
   }, []);
 
   useEffect(() => {
     if (generatedScript && !loading) {
-      nextStep();
+      useWizardStore.getState().nextStep();
     }
   }, [generatedScript, loading]);
 
