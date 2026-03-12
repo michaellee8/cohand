@@ -81,12 +81,12 @@ export function createRemoteHandler(
           params: message.params,
           tabId: message.tabId,
         };
-        return await executeRemoteCommand(cdp, command, session.allowedDomains, getTabUrl);
+        return await executeRemoteCommand(cdp, command, session.allowedDomains, getTabUrl, extensionId);
       }
 
-      // Release tab
+      // Release tab — pass extensionId so only the owning session can release
       if (message.type === 'remote:release') {
-        releaseTab(message.tabId);
+        releaseTab(message.tabId, extensionId);
         return { ok: true };
       }
 

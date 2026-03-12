@@ -6,6 +6,7 @@ import {
   getTabOwner,
   resetTabOwnership,
   executeRemoteCommand,
+  isSensitiveScheme,
   type RemoteCommand,
 } from './remote-relay';
 import { createRemoteHandler, clearActiveSessions, getActiveSessionCount } from './remote-server';
@@ -118,13 +119,19 @@ describe('remote-relay', () => {
     it('claims tab for remote', () => {
       const claimed = claimTab(1, 'remote');
       expect(claimed).toBe(true);
-      expect(getTabOwner(1)).toBe('remote');
+      expect(getTabOwner(1)).toEqual({ owner: 'remote', sessionId: undefined });
+    });
+
+    it('claims tab for remote with sessionId', () => {
+      const claimed = claimTab(1, 'remote', 'session-abc');
+      expect(claimed).toBe(true);
+      expect(getTabOwner(1)).toEqual({ owner: 'remote', sessionId: 'session-abc' });
     });
 
     it('claims tab for local', () => {
       const claimed = claimTab(1, 'local');
       expect(claimed).toBe(true);
-      expect(getTabOwner(1)).toBe('local');
+      expect(getTabOwner(1)).toEqual({ owner: 'local', sessionId: undefined });
     });
 
     it('allows re-claiming tab with same mode', () => {
@@ -133,23 +140,55 @@ describe('remote-relay', () => {
       expect(again).toBe(true);
     });
 
+    it('allows re-claiming tab with same mode and same sessionId', () => {
+      claimTab(1, 'remote', 'session-1');
+      const again = claimTab(1, 'remote', 'session-1');
+      expect(again).toBe(true);
+    });
+
+    it('rejects remote claim from different session', () => {
+      claimTab(1, 'remote', 'session-1');
+      const claim2 = claimTab(1, 'remote', 'session-2');
+      expect(claim2).toBe(false);
+      expect(getTabOwner(1)).toEqual({ owner: 'remote', sessionId: 'session-1' });
+    });
+
     it('rejects claim when tab under local control', () => {
       claimTab(1, 'local');
       const remoteClaim = claimTab(1, 'remote');
       expect(remoteClaim).toBe(false);
-      expect(getTabOwner(1)).toBe('local');
+      expect(getTabOwner(1)?.owner).toBe('local');
     });
 
     it('rejects claim when tab under remote control for local mode', () => {
       claimTab(1, 'remote');
       const localClaim = claimTab(1, 'local');
       expect(localClaim).toBe(false);
-      expect(getTabOwner(1)).toBe('remote');
+      expect(getTabOwner(1)?.owner).toBe('remote');
     });
 
     it('releases tab', () => {
       claimTab(1, 'remote');
       releaseTab(1);
+      expect(getTabOwner(1)).toBeNull();
+    });
+
+    it('releases tab with matching sessionId', () => {
+      claimTab(1, 'remote', 'session-1');
+      releaseTab(1, 'session-1');
+      expect(getTabOwner(1)).toBeNull();
+    });
+
+    it('rejects release with mismatched sessionId', () => {
+      claimTab(1, 'remote', 'session-1');
+      releaseTab(1, 'session-2');
+      // Tab should still be owned by session-1
+      expect(getTabOwner(1)).toEqual({ owner: 'remote', sessionId: 'session-1' });
+    });
+
+    it('release without sessionId releases any tab', () => {
+      claimTab(1, 'remote', 'session-1');
+      releaseTab(1); // No sessionId — acts as unconditional release (for local callers)
       expect(getTabOwner(1)).toBeNull();
     });
 
@@ -333,7 +372,7 @@ describe('remote-relay', () => {
       const cmd2: RemoteCommand = { id: 2, method: 'Page.navigate', tabId: 20, params: { url: 'https://example.com' } };
 
       await executeRemoteCommand(cdp, cmd1, ['example.com'], getTabUrl);
-      expect(getTabOwner(20)).toBe('remote');
+      expect(getTabOwner(20)?.owner).toBe('remote');
 
       const result2 = await executeRemoteCommand(cdp, cmd2, ['example.com'], getTabUrl);
       expect(result2.ok).toBe(true);
@@ -456,7 +495,7 @@ describe('remote-server', () => {
       method: 'DOM.getDocument',
       tabId: 10,
     });
-    expect(getTabOwner(10)).toBe('remote');
+    expect(getTabOwner(10)?.owner).toBe('remote');
 
     // Release the tab
     const response = await callHandler({
@@ -652,5 +691,189 @@ describe('remote-server', () => {
         expect.objectContaining({ error: expect.stringContaining('Tab URL lookup failed') }),
       );
     });
+  });
+
+  it('release from different extension does not release tab (session-aware ownership)', async () => {
+    const token = await getOrCreateToken();
+    mockDebugger.sendCommand.mockResolvedValue({});
+
+    // Configure domain permissions
+    await mockStorage.local.set({
+      domainPermissions: [{ domain: 'example.com', addedAt: new Date().toISOString() }],
+    });
+
+    // Auth ext-A and claim a tab
+    await callHandler({
+      type: 'remote:auth',
+      token,
+      allowedDomains: ['example.com'],
+    }, 'ext-A');
+
+    await callHandler({
+      type: 'remote:command',
+      id: 1,
+      method: 'DOM.getDocument',
+      tabId: 30,
+    }, 'ext-A');
+
+    expect(getTabOwner(30)?.owner).toBe('remote');
+    expect(getTabOwner(30)?.sessionId).toBe('ext-A');
+
+    // Auth ext-B
+    await callHandler({
+      type: 'remote:auth',
+      token,
+      allowedDomains: ['example.com'],
+    }, 'ext-B');
+
+    // ext-B tries to release ext-A's tab — should NOT release
+    await callHandler({
+      type: 'remote:release',
+      tabId: 30,
+    }, 'ext-B');
+
+    // Tab should still be owned by ext-A
+    expect(getTabOwner(30)?.owner).toBe('remote');
+    expect(getTabOwner(30)?.sessionId).toBe('ext-A');
+  });
+});
+
+// ========================
+// isSensitiveScheme tests (H11)
+// ========================
+
+describe('isSensitiveScheme', () => {
+  it('identifies chrome:// URLs as sensitive', () => {
+    expect(isSensitiveScheme('chrome://settings')).toBe(true);
+    expect(isSensitiveScheme('chrome://extensions')).toBe(true);
+  });
+
+  it('identifies chrome-extension:// URLs as sensitive', () => {
+    expect(isSensitiveScheme('chrome-extension://abcdef123/popup.html')).toBe(true);
+  });
+
+  it('identifies about: URLs as sensitive', () => {
+    expect(isSensitiveScheme('about:blank')).toBe(true);
+    expect(isSensitiveScheme('about:srcdoc')).toBe(true);
+  });
+
+  it('identifies file:// URLs as sensitive', () => {
+    expect(isSensitiveScheme('file:///etc/passwd')).toBe(true);
+    expect(isSensitiveScheme('file:///home/user/document.html')).toBe(true);
+  });
+
+  it('identifies devtools:// URLs as sensitive', () => {
+    expect(isSensitiveScheme('devtools://devtools/bundled/inspector.html')).toBe(true);
+  });
+
+  it('returns false for https:// URLs', () => {
+    expect(isSensitiveScheme('https://example.com')).toBe(false);
+  });
+
+  it('returns false for http:// URLs', () => {
+    expect(isSensitiveScheme('http://example.com')).toBe(false);
+  });
+});
+
+// ========================
+// Sensitive page blocking in executeRemoteCommand (H11)
+// ========================
+
+describe('executeRemoteCommand sensitive page blocking', () => {
+  let cdp: CDPManager;
+  const getTabUrl = vi.fn<(tabId: number) => Promise<string>>();
+
+  beforeEach(() => {
+    cdp = new CDPManager();
+    getTabUrl.mockReset();
+  });
+
+  it('blocks CDP command on chrome:// page', async () => {
+    getTabUrl.mockResolvedValue('chrome://settings');
+
+    const command: RemoteCommand = {
+      id: 1,
+      method: 'DOM.getDocument',
+      tabId: 10,
+    };
+
+    const result = await executeRemoteCommand(cdp, command, ['*'], getTabUrl);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('sensitive page');
+  });
+
+  it('blocks CDP command on file:// page', async () => {
+    getTabUrl.mockResolvedValue('file:///etc/passwd');
+
+    const command: RemoteCommand = {
+      id: 2,
+      method: 'DOM.getDocument',
+      tabId: 10,
+    };
+
+    const result = await executeRemoteCommand(cdp, command, ['*'], getTabUrl);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('sensitive page');
+  });
+
+  it('blocks Page.navigate to chrome:// URL', async () => {
+    getTabUrl.mockResolvedValue('https://example.com');
+    mockDebugger.sendCommand.mockResolvedValue({});
+
+    const command: RemoteCommand = {
+      id: 3,
+      method: 'Page.navigate',
+      params: { url: 'chrome://settings' },
+      tabId: 10,
+    };
+
+    const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Navigation to sensitive URL blocked');
+  });
+
+  it('blocks Page.navigate to file:// URL', async () => {
+    getTabUrl.mockResolvedValue('https://example.com');
+    mockDebugger.sendCommand.mockResolvedValue({});
+
+    const command: RemoteCommand = {
+      id: 4,
+      method: 'Page.navigate',
+      params: { url: 'file:///etc/passwd' },
+      tabId: 10,
+    };
+
+    const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Navigation to sensitive URL blocked');
+  });
+
+  it('allows Page.navigate to normal https:// URL', async () => {
+    getTabUrl.mockResolvedValue('https://example.com');
+    mockDebugger.sendCommand.mockResolvedValue({ frameId: '123' });
+
+    const command: RemoteCommand = {
+      id: 5,
+      method: 'Page.navigate',
+      params: { url: 'https://example.com/page2' },
+      tabId: 10,
+    };
+
+    const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+    expect(result.ok).toBe(true);
+  });
+
+  it('blocks CDP command on about:blank page', async () => {
+    getTabUrl.mockResolvedValue('about:blank');
+
+    const command: RemoteCommand = {
+      id: 6,
+      method: 'DOM.getDocument',
+      tabId: 10,
+    };
+
+    const result = await executeRemoteCommand(cdp, command, ['*'], getTabUrl);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('sensitive page');
   });
 });

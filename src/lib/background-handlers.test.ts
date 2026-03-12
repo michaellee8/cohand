@@ -273,6 +273,9 @@ beforeEach(async () => {
   router.on('EXECUTE_TASK', async () => ({ ok: true as const }));
   router.on('CANCEL_EXECUTION', async () => ({ ok: true as const }));
 
+  // RECORDING_ACTION — stub (fire-and-forget enrichment not tested here)
+  router.on('RECORDING_ACTION', async () => ({ ok: true as const }));
+
   // GENERATE_SCRIPT / TEST_SCRIPT — stubs
   router.on('GENERATE_SCRIPT', async () => ({
     source: '',
@@ -676,6 +679,7 @@ describe('All message types have handlers', () => {
     'ENSURE_OFFSCREEN',
     'ADD_DOMAIN_PERMISSION',
     'REMOVE_DOMAIN_PERMISSION',
+    'RECORDING_ACTION',
   ];
 
   for (const type of messageTypes) {

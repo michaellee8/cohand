@@ -21,8 +21,8 @@ export interface ExecutionContext {
   db: IDBDatabase;
   taskTabMap: Map<string, number>;
   executionAbortControllers: Map<string, AbortController>;
-  claimTab: (tabId: number, mode: 'local' | 'remote') => boolean;
-  releaseTab: (tabId: number) => void;
+  claimTab: (tabId: number, mode: 'local' | 'remote', sessionId?: string) => boolean;
+  releaseTab: (tabId: number, sessionId?: string) => void;
   cdp: CDPManager;
   ensureOffscreen: () => Promise<void>;
 }

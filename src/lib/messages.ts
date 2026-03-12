@@ -37,6 +37,7 @@ export type Message =
   // Recording
   | { type: 'START_RECORDING'; tabId: number }
   | { type: 'STOP_RECORDING'; sessionId: string }
+  | { type: 'RECORDING_ACTION'; action: import('../types/recording').RawRecordingAction }
   | { type: 'OAUTH_CALLBACK'; code: string; state: string }
   | { type: 'START_CODEX_OAUTH' }
   | { type: 'LOGOUT_CODEX' }
@@ -67,6 +68,7 @@ export type MessageResponse = {
   REMOVE_DOMAIN_PERMISSION: { ok: true };
   START_RECORDING: { ok: true; sessionId: string };
   STOP_RECORDING: { ok: true };
+  RECORDING_ACTION: { ok: true };
   OAUTH_CALLBACK: { ok: true };
   START_CODEX_OAUTH: { ok: true };
   LOGOUT_CODEX: { ok: true };
@@ -74,8 +76,8 @@ export type MessageResponse = {
 };
 
 // Content script → Service worker (events from recording overlay)
+// NOTE: RECORDING_ACTION has been moved to the main Message union above.
 export type ContentScriptEvent =
-  | { type: 'RECORDING_ACTION'; action: import('../types/recording').RawRecordingAction }
   | { type: 'KEYSTROKE_UPDATE'; text: string; element: { selector: string; tag: string; name?: string }; isFinal: boolean }
   | { type: 'ELEMENT_SELECTION'; elementInfo: Record<string, unknown>; url: string; cancelled?: boolean };
 

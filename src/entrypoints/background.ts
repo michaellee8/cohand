@@ -493,48 +493,45 @@ export default defineBackground(() => {
     return { ok: true as const };
   });
 
-  // Content script events (recording actions) — separate from router
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.type === 'RECORDING_ACTION' && sender.tab) {
-      // Acknowledge immediately
-      sendResponse({ ok: true });
-
-      // Async enrichment (screenshot + persist + forward)
-      (async () => {
+  router.on('RECORDING_ACTION', async (msg, sender) => {
+    // Fire-and-forget enrichment (screenshot + persist + forward)
+    // Return { ok: true } immediately; enrichment runs in background.
+    (async () => {
+      try {
+        // Capture screenshot
+        let screenshot: string | undefined;
         try {
-          // Capture screenshot
-          let screenshot: string | undefined;
-          try {
+          if (sender.tab?.windowId != null) {
             screenshot = await chrome.tabs.captureVisibleTab(
-              sender.tab!.windowId!,
+              sender.tab.windowId,
               { format: 'png' },
             );
-          } catch {
-            // Screenshot may fail on restricted pages
           }
-
-          const step: RecordingStep = {
-            id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            recordingId: '', // Set by the sidepanel store
-            sequenceIndex: 0, // Set by the sidepanel store
-            status: 'enriched',
-            ...msg.action,
-            screenshot,
-          };
-
-          // Persist step to IndexedDB (without screenshot)
-          const { screenshot: _, ...stepWithoutScreenshot } = step;
-          await putRecordingStep(db, stepWithoutScreenshot as any);
-
-          // Forward enriched step via recording port
-          recordingPort?.postMessage({ type: 'RECORDING_STEP', step });
-        } catch (err) {
-          console.error('[Cohand] Failed to process recording action:', err);
+        } catch {
+          // Screenshot may fail on restricted pages
         }
-      })();
 
-      return true; // async response
-    }
+        const step: RecordingStep = {
+          id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          recordingId: '', // Set by the sidepanel store
+          sequenceIndex: 0, // Set by the sidepanel store
+          status: 'enriched',
+          ...msg.action,
+          screenshot,
+        };
+
+        // Persist step to IndexedDB (without screenshot)
+        const { screenshot: _, ...stepWithoutScreenshot } = step;
+        await putRecordingStep(db, stepWithoutScreenshot as any);
+
+        // Forward enriched step via recording port
+        recordingPort?.postMessage({ type: 'RECORDING_STEP', step });
+      } catch (err) {
+        console.error('[Cohand] Failed to process recording action:', err);
+      }
+    })();
+
+    return { ok: true as const };
   });
 
   // ---------------------------------------------------------------------------
