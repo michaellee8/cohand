@@ -3,6 +3,11 @@
 // The real implementation (Task 6.2) will use QuickJS WASM.
 console.log('[Cohand] Sandbox loaded');
 
+// Extension origin for targeted postMessage
+const PARENT_ORIGIN = (() => {
+  try { return new URL(chrome.runtime.getURL('')).origin; } catch { return '*'; }
+})();
+
 // Pending RPC callbacks
 const pendingRPCs = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 let rpcNextId = 1;
@@ -28,7 +33,7 @@ function sendRPC(taskId: string, method: string, args: Record<string, unknown>):
   const id = rpcNextId++;
   return new Promise((resolve, reject) => {
     pendingRPCs.set(id, { resolve, reject });
-    window.parent.postMessage({ id, type: 'rpc', method, args, taskId }, '*');
+    window.parent.postMessage({ id, type: 'rpc', method, args, taskId }, PARENT_ORIGIN);
   });
 }
 
@@ -69,13 +74,13 @@ window.addEventListener('message', async (event) => {
         ok: true,
         result,
         state: context.state,
-      }, '*');
+      }, PARENT_ORIGIN);
     } catch (err: any) {
       window.parent.postMessage({
         type: 'execute-script-result',
         ok: false,
         error: err.message || String(err),
-      }, '*');
+      }, PARENT_ORIGIN);
     }
   }
 });

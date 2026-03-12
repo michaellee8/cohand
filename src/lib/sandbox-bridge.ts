@@ -99,8 +99,16 @@ export class SandboxBridge {
     return () => window.removeEventListener('message', handler);
   }
 
+  private getTargetOrigin(): string {
+    try {
+      return new URL(chrome.runtime.getURL('')).origin;
+    } catch {
+      return '*'; // fallback for test environment
+    }
+  }
+
   private sendToSandbox(data: unknown): void {
-    this.iframe?.contentWindow?.postMessage(data, '*');
+    this.iframe?.contentWindow?.postMessage(data, this.getTargetOrigin());
   }
 
   destroy(): void {

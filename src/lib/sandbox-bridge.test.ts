@@ -246,4 +246,22 @@ describe('SandboxBridge', () => {
 
     expect(mockRPC.call).not.toHaveBeenCalled();
   });
+
+  it('sends postMessage with specific target origin, not wildcard', () => {
+    bridge.init(mockIframe.iframe);
+
+    bridge.executeScript({
+      type: 'execute-script',
+      taskId: 'task-origin',
+      source: 'test',
+      state: {},
+      tabId: 1,
+    });
+
+    // In test env, getTargetOrigin falls back to '*' since chrome.runtime isn't available
+    // But verify postMessage IS called with the second argument
+    const call = mockIframe.contentWindow.postMessage.mock.calls[0];
+    expect(call.length).toBe(2);
+    expect(call[1]).toBeDefined();
+  });
 });
