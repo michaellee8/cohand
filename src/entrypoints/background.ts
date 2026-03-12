@@ -472,7 +472,7 @@ export default defineBackground(() => {
   // ---------------------------------------------------------------------------
 
   router.on('START_RECORDING', async (msg) => {
-    const sessionId = `rec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const sessionId = `rec-${crypto.randomUUID()}`;
     await putRecording(db, {
       id: sessionId,
       startedAt: new Date().toISOString(),

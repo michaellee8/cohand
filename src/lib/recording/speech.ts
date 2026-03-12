@@ -104,6 +104,7 @@ export type SpeechCallback = (result: SpeechResult) => void;
 let recognition: SpeechRecognition | null = null;
 let callback: SpeechCallback | null = null;
 let segmentStart = 0;
+let sessionActive = false;
 
 // ---------------------------------------------------------------------------
 // Permissions
@@ -131,14 +132,18 @@ export async function requestMicPermission(): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 export function startSpeechRecognition(onResult: SpeechCallback): void {
+  sessionActive = true;
+
   if (recognition) {
     stopSpeechRecognition();
+    sessionActive = true; // Re-set after stop clears it
   }
 
   const SpeechRecognitionCtor =
     window.SpeechRecognition ?? window.webkitSpeechRecognition;
 
   if (!SpeechRecognitionCtor) {
+    sessionActive = false;
     throw new Error('SpeechRecognition API is not available in this browser');
   }
 
@@ -150,6 +155,7 @@ export function startSpeechRecognition(onResult: SpeechCallback): void {
   rec.lang = 'en-US';
 
   rec.onresult = (event) => {
+    if (!sessionActive) return;
     const now = Date.now();
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
@@ -179,12 +185,14 @@ export function startSpeechRecognition(onResult: SpeechCallback): void {
   };
 
   rec.onerror = (event) => {
+    if (!sessionActive) return;
     if (event.error === 'not-allowed') {
       stopSpeechRecognition();
     }
   };
 
   rec.onend = () => {
+    if (!sessionActive) return;
     // Auto-restart if still active (browser stops after silence)
     try {
       rec.start();
@@ -199,6 +207,8 @@ export function startSpeechRecognition(onResult: SpeechCallback): void {
 }
 
 export function stopSpeechRecognition(): void {
+  sessionActive = false;
+
   if (!recognition) return;
 
   // Prevent auto-restart in the onend handler

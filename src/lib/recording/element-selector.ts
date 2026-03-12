@@ -177,10 +177,20 @@ function sendKeystrokeUpdate(
   });
 }
 
+// Allowlist of element attributes safe to capture during recording.
+// All other attributes are filtered out to prevent leaking sensitive data
+// (e.g. data-user-id, data-token, internal framework attributes).
+const ALLOWED_ATTRIBUTES = new Set([
+  'id', 'class', 'role', 'aria-label', 'data-testid',
+  'href', 'type', 'name', 'placeholder', 'value',
+]);
+
 function collectElementMeta(el: Element): Partial<RawRecordingAction> {
   const attrs: Record<string, string> = {};
   for (const attr of Array.from(el.attributes)) {
-    attrs[attr.name] = attr.value;
+    if (ALLOWED_ATTRIBUTES.has(attr.name)) {
+      attrs[attr.name] = attr.value;
+    }
   }
 
   return {
@@ -363,6 +373,8 @@ export function deactivate(): void {
 
   // Flush any pending keystrokes
   flushKeystrokeBuffer();
+  keystrokeTarget = null;
+  keystrokeBuffer = '';
 
   document.removeEventListener('mouseover', onMouseOver, true);
   document.removeEventListener('mouseout', onMouseOut, true);

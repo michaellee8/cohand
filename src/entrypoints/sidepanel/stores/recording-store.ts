@@ -27,7 +27,17 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
   error: null,
 
   startRecording: async (tabId: number) => {
-    const sessionId = `rec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    set({ isRecording: true, isPaused: false, session: null, error: null });
+
+    let sessionId: string;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'START_RECORDING', tabId });
+      sessionId = response.sessionId;
+    } catch (err: any) {
+      set({ isRecording: false, session: null, error: err.message });
+      return;
+    }
+
     const session: RecordingSession = {
       id: sessionId,
       startedAt: new Date().toISOString(),
@@ -36,14 +46,7 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
       pageSnapshots: {},
       steps: [],
     };
-    set({ isRecording: true, isPaused: false, session, error: null });
-
-    try {
-      await chrome.runtime.sendMessage({ type: 'START_RECORDING', tabId });
-    } catch (err: any) {
-      set({ isRecording: false, session: null, error: err.message });
-      return;
-    }
+    set({ session });
     // Content script activation is best-effort — recording still works
     // even if the content script isn't loaded (e.g. on restricted pages).
     try {
