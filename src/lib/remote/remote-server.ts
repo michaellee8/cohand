@@ -33,7 +33,7 @@ export function createRemoteHandler(
   cdp: CDPManager,
   getTabUrl: (tabId: number) => Promise<string>,
 ) {
-  return async (
+  return (
     message: any,
     sender: chrome.runtime.MessageSender,
     sendResponse: (response: any) => void,
@@ -44,65 +44,63 @@ export function createRemoteHandler(
       return true;
     }
 
-    // Auth handshake
-    if (message.type === 'remote:auth') {
-      const valid = await validateToken(message.token);
-      if (!valid) {
-        sendResponse({ ok: false, error: 'Invalid token' });
-        return true;
+    (async () => {
+      // Auth handshake
+      if (message.type === 'remote:auth') {
+        const valid = await validateToken(message.token);
+        if (!valid) {
+          return { ok: false, error: 'Invalid token' };
+        }
+        // Intersect client-requested domains with user's configured permissions
+        const configuredPermissions = await getDomainPermissions();
+        const configuredDomains = new Set(configuredPermissions.map(p => p.domain));
+        const requestedDomains: string[] = message.allowedDomains || [];
+        const allowedDomains = configuredDomains.size > 0
+          ? requestedDomains.filter(d => configuredDomains.has(d))
+          : []; // No configured permissions = no domains allowed
+
+        activeSessions.set(extensionId, {
+          extensionId,
+          allowedDomains,
+          authenticatedAt: Date.now(),
+        });
+        return { ok: true };
       }
-      // Intersect client-requested domains with user's configured permissions
-      const configuredPermissions = await getDomainPermissions();
-      const configuredDomains = new Set(configuredPermissions.map(p => p.domain));
-      const requestedDomains: string[] = message.allowedDomains || [];
-      const allowedDomains = configuredDomains.size > 0
-        ? requestedDomains.filter(d => configuredDomains.has(d))
-        : []; // No configured permissions = no domains allowed
 
-      activeSessions.set(extensionId, {
-        extensionId,
-        allowedDomains,
-        authenticatedAt: Date.now(),
-      });
-      sendResponse({ ok: true });
-      return true;
-    }
+      // All other messages require auth
+      const session = activeSessions.get(extensionId);
+      if (!session) {
+        return { ok: false, error: 'Not authenticated' };
+      }
 
-    // All other messages require auth
-    const session = activeSessions.get(extensionId);
-    if (!session) {
-      sendResponse({ ok: false, error: 'Not authenticated' });
-      return true;
-    }
+      // CDP command
+      if (message.type === 'remote:command') {
+        const command: RemoteCommand = {
+          id: message.id,
+          method: message.method,
+          params: message.params,
+          tabId: message.tabId,
+        };
+        return await executeRemoteCommand(cdp, command, session.allowedDomains, getTabUrl);
+      }
 
-    // CDP command
-    if (message.type === 'remote:command') {
-      const command: RemoteCommand = {
-        id: message.id,
-        method: message.method,
-        params: message.params,
-        tabId: message.tabId,
-      };
-      const result = await executeRemoteCommand(cdp, command, session.allowedDomains, getTabUrl);
-      sendResponse(result);
-      return true;
-    }
+      // Release tab
+      if (message.type === 'remote:release') {
+        releaseTab(message.tabId);
+        return { ok: true };
+      }
 
-    // Release tab
-    if (message.type === 'remote:release') {
-      releaseTab(message.tabId);
-      sendResponse({ ok: true });
-      return true;
-    }
+      // Disconnect
+      if (message.type === 'remote:disconnect') {
+        activeSessions.delete(extensionId);
+        return { ok: true };
+      }
 
-    // Disconnect
-    if (message.type === 'remote:disconnect') {
-      activeSessions.delete(extensionId);
-      sendResponse({ ok: true });
-      return true;
-    }
+      return { error: 'Unknown remote message type' };
+    })()
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({ error: err instanceof Error ? err.message : String(err) }));
 
-    sendResponse({ error: 'Unknown remote message type' });
-    return true;
+    return true; // Keep message channel open for async response
   };
 }

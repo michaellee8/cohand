@@ -595,4 +595,62 @@ describe('remote-server', () => {
     await callHandler({ type: 'remote:disconnect' }, 'ext-1');
     expect(getActiveSessionCount()).toBe(1);
   });
+
+  it('returns true synchronously to keep message channel open', () => {
+    const sender: chrome.runtime.MessageSender = {
+      id: 'test-extension-id',
+    } as chrome.runtime.MessageSender;
+    const sendResponse = vi.fn();
+
+    const result = handler({ type: 'remote:auth', token: 'any' }, sender, sendResponse);
+
+    // Must return exactly `true` (not a Promise) synchronously
+    expect(result).toBe(true);
+  });
+
+  it('calls sendResponse after async work completes', async () => {
+    const token = await getOrCreateToken();
+    const sendResponse = vi.fn();
+    const sender: chrome.runtime.MessageSender = {
+      id: 'test-extension-id',
+    } as chrome.runtime.MessageSender;
+
+    handler({ type: 'remote:auth', token, allowedDomains: ['example.com'] }, sender, sendResponse);
+
+    // sendResponse should not have been called synchronously (async path)
+    // Wait for the microtask to resolve
+    await vi.waitFor(() => {
+      expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+    });
+  });
+
+  it('calls sendResponse with error when async work throws', async () => {
+    const token = await getOrCreateToken();
+    const sendResponse = vi.fn();
+    const sender: chrome.runtime.MessageSender = {
+      id: 'test-extension-id',
+    } as chrome.runtime.MessageSender;
+
+    // Auth first so we have a session
+    await callHandler({
+      type: 'remote:auth',
+      token,
+      allowedDomains: ['example.com'],
+    });
+
+    // Make executeRemoteCommand throw
+    getTabUrl.mockRejectedValueOnce(new Error('Tab URL lookup failed'));
+
+    handler(
+      { type: 'remote:command', id: 99, method: 'DOM.getDocument', tabId: 10 },
+      sender,
+      sendResponse,
+    );
+
+    await vi.waitFor(() => {
+      expect(sendResponse).toHaveBeenCalledWith(
+        expect.objectContaining({ error: expect.stringContaining('Tab URL lookup failed') }),
+      );
+    });
+  });
 });
