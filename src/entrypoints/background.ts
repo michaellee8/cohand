@@ -60,6 +60,7 @@ import {
   importKey,
   encrypt,
 } from '../lib/crypto';
+import { validateAST } from '../lib/security/ast-validator';
 import type { ScriptVersion, ScriptRun, RecordingStep } from '../types';
 
 export default defineBackground(() => {
@@ -301,6 +302,12 @@ export default defineBackground(() => {
       const activeVersion = versions.find(v => v.version === task.activeScriptVersion);
       if (!activeVersion) throw new Error(`Script version ${task.activeScriptVersion} not found`);
 
+      // Re-validate AST before execution (H12 — enforce security gates)
+      const validation = validateAST(activeVersion.source);
+      if (!validation.valid) {
+        throw new Error(`Script failed AST validation: ${validation.errors.join(', ')}`);
+      }
+
       // Get current state
       const taskState = await getTaskState(db, taskId);
       const currentState = taskState?.state ?? {};
@@ -421,6 +428,12 @@ export default defineBackground(() => {
 
   router.on('TEST_SCRIPT', async (msg) => {
     const { tabId, source, domains } = msg;
+
+    // Validate AST before test execution (H12)
+    const validation = validateAST(source);
+    if (!validation.valid) {
+      return { ok: false, error: `AST validation failed: ${validation.errors.join(', ')}` };
+    }
 
     try {
       // Claim tab
