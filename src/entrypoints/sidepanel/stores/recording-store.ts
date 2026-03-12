@@ -33,8 +33,8 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
     try {
       const response = await chrome.runtime.sendMessage({ type: 'START_RECORDING', tabId });
       sessionId = response.sessionId;
-    } catch (err: any) {
-      set({ isRecording: false, session: null, error: err.message });
+    } catch (err: unknown) {
+      set({ isRecording: false, session: null, error: err instanceof Error ? err.message : String(err) });
       return;
     }
 
@@ -51,8 +51,9 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
     // even if the content script isn't loaded (e.g. on restricted pages).
     try {
       await chrome.tabs.sendMessage(tabId, { type: 'ACTIVATE_RECORDING' });
-    } catch {
+    } catch (e) {
       // Content script not available — recording proceeds without it
+      console.warn('[Cohand] Could not activate recording content script:', String(e));
     }
   },
 
@@ -62,11 +63,11 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
     // Deactivate content script (best-effort, may fail on restricted pages)
     try {
       await chrome.tabs.sendMessage(session.activeTabId, { type: 'DEACTIVATE_RECORDING' });
-    } catch { /* content script not available */ }
+    } catch (e) { console.warn('[Cohand] Could not deactivate recording:', String(e)); }
     // Notify service worker
     try {
       await chrome.runtime.sendMessage({ type: 'STOP_RECORDING', sessionId: session.id });
-    } catch { /* best effort */ }
+    } catch (e) { console.warn('[Cohand] Could not notify stop recording:', String(e)); }
     set(state => ({
       isRecording: false,
       isPaused: false,

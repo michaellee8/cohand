@@ -104,8 +104,9 @@ export const useWizardStore = create<WizardState>((set, get) => ({
           tabId: tab.id,
         });
         screenshot = screenshotResponse.dataUrl;
-      } catch {
+      } catch (e) {
         // Screenshot may fail on restricted pages
+        console.warn('[Cohand] Screenshot capture failed:', String(e));
       }
 
       const observation: ExplorationResult = {

@@ -191,7 +191,7 @@ export function extractAccountId(accessToken: string): string | undefined {
       payload['https://api.openai.com/auth']?.chatgpt_account_id ??
       undefined
     );
-  } catch {
+  } catch (_e) {
     return undefined;
   }
 }

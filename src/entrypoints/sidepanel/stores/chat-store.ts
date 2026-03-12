@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { stream as piStream, complete as piComplete } from '@mariozechner/pi-ai';
-import { resolveModel, resolveApiKey } from '../../../lib/pi-ai-bridge';
+import { resolveModel, resolveApiKey, type ModelLike } from '../../../lib/pi-ai-bridge';
 import { getSettings } from '../../../lib/storage';
 import type { RecordingSession } from '../../../types/recording';
 import { buildRecordingGenerationMessages, parseGenerationOutput } from '../../../lib/recording/recording-prompts';
@@ -17,7 +17,7 @@ interface ChatState {
   messages: ChatMessage[];
   isStreaming: boolean;
   error: string | null;
-  model: any | null;
+  model: ModelLike | null;
   apiKey: string | null;
   abortController: AbortController | null;
 
@@ -52,8 +52,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const token = await resolveApiKey(settings);
       const model = resolveModel(settings);
       set({ model, apiKey: token, error: null });
-    } catch (err: any) {
-      set({ error: `Failed to initialize LLM: ${err.message}` });
+    } catch (err: unknown) {
+      set({ error: `Failed to initialize LLM: ${err instanceof Error ? err.message : String(err)}` });
     }
   },
 
@@ -127,8 +127,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         isStreaming: false,
         abortController: null,
       }));
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
         set(state => ({
           messages: state.messages.map(m =>
             m.id === assistantMessage.id
@@ -139,14 +139,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           abortController: null,
         }));
       } else {
+        const message = err instanceof Error ? err.message : String(err);
         set(state => ({
           messages: state.messages.map(m =>
             m.id === assistantMessage.id
-              ? { ...m, content: `Error: ${err.message}`, streaming: false }
+              ? { ...m, content: `Error: ${message}`, streaming: false }
               : m
           ),
           isStreaming: false,
-          error: err.message,
+          error: message,
           abortController: null,
         }));
       }
@@ -198,12 +199,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
 
       const result = await piComplete(model, context as any, { apiKey, transport: 'sse' });
-      const text = typeof result === 'string' ? result : (result as any)?.message?.content?.[0]?.text ?? '';
+      const textPart = result.content.find((p): p is { type: 'text'; text: string } => p.type === 'text');
+      const text = textPart?.text ?? '';
       const { description, script } = parseGenerationOutput(text);
 
       set({ generatedScript: script, generatedDescription: description, isStreaming: false });
-    } catch (err: any) {
-      set({ error: err.message, isStreaming: false });
+    } catch (err: unknown) {
+      set({ error: err instanceof Error ? err.message : String(err), isStreaming: false });
     }
   },
 }));

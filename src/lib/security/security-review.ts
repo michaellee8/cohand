@@ -1,5 +1,6 @@
 import { complete } from '@mariozechner/pi-ai';
 import type { Context, Message, UserMessage, AssistantMessage } from '@mariozechner/pi-ai';
+import type { ModelLike } from '../pi-ai-bridge';
 import type { ReviewDetail } from '../../types';
 import { buildReviewMessages } from './review-prompts';
 
@@ -47,7 +48,7 @@ function extractText(result: AssistantMessage): string {
  */
 export async function securityReview(
   source: string,
-  models: [any, any],
+  models: [ModelLike, ModelLike],
   apiKey: string,
   previousApprovedSource?: string,
 ): Promise<SecurityReviewResult> {
@@ -66,7 +67,7 @@ export async function securityReview(
 
 async function runSingleReview(
   source: string,
-  model: any,
+  model: ModelLike,
   apiKey: string,
   promptType: 'data_flow' | 'capability',
   previousApprovedSource?: string,

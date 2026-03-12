@@ -1,5 +1,6 @@
 import { complete } from '@mariozechner/pi-ai';
 import type { Context, Message, UserMessage, AssistantMessage } from '@mariozechner/pi-ai';
+import type { ModelLike } from './pi-ai-bridge';
 import { validateAST } from './security/ast-validator';
 import { buildGenerationMessages, buildRepairMessages } from './explorer-prompts';
 
@@ -63,8 +64,9 @@ export async function observePage(tabId: number): Promise<ExplorationResult> {
   let screenshot: string | undefined;
   try {
     screenshot = await chrome.tabs.captureVisibleTab(tab.windowId!, { format: 'png' });
-  } catch {
-    // Screenshot may fail on restricted pages
+  } catch (e) {
+    // Screenshot may fail on restricted pages — propagate as warning but don't block
+    console.warn('[Cohand] Screenshot capture failed:', String(e));
   }
 
   return {
@@ -79,7 +81,7 @@ export async function observePage(tabId: number): Promise<ExplorationResult> {
  * Generate an automation script from a natural language description.
  */
 export async function generateScript(
-  model: any,
+  model: ModelLike,
   apiKey: string,
   description: string,
   observation: ExplorationResult,
@@ -113,7 +115,7 @@ export async function generateScript(
  * Generate a repair for a failing script.
  */
 export async function repairScript(
-  model: any,
+  model: ModelLike,
   apiKey: string,
   params: {
     source: string;
