@@ -105,6 +105,7 @@ let recognition: SpeechRecognition | null = null;
 let callback: SpeechCallback | null = null;
 let segmentStart = 0;
 let sessionActive = false;
+let paused = false;
 
 // ---------------------------------------------------------------------------
 // Permissions
@@ -133,6 +134,7 @@ export async function requestMicPermission(): Promise<boolean> {
 
 export function startSpeechRecognition(onResult: SpeechCallback): void {
   sessionActive = true;
+  paused = false;
 
   if (recognition) {
     stopSpeechRecognition();
@@ -192,7 +194,7 @@ export function startSpeechRecognition(onResult: SpeechCallback): void {
   };
 
   rec.onend = () => {
-    if (!sessionActive) return;
+    if (!sessionActive || paused) return;
     // Auto-restart if still active (browser stops after silence)
     try {
       rec.start();
@@ -208,6 +210,7 @@ export function startSpeechRecognition(onResult: SpeechCallback): void {
 
 export function stopSpeechRecognition(): void {
   sessionActive = false;
+  paused = false;
 
   if (!recognition) return;
 
@@ -220,10 +223,12 @@ export function stopSpeechRecognition(): void {
 }
 
 export function pauseSpeechRecognition(): void {
+  paused = true;
   recognition?.stop();
 }
 
 export function resumeSpeechRecognition(): void {
+  paused = false;
   try {
     recognition?.start();
   } catch {

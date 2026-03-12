@@ -14,6 +14,7 @@ import {
   MAX_RUNS_PER_TASK,
   MAX_SCRIPT_VERSIONS,
   MAX_STATE_SNAPSHOTS_PER_TASK,
+  MAX_NOTIFICATIONS_PER_TASK_PER_HOUR,
 } from '../constants';
 
 // ---------------------------------------------------------------------------
@@ -146,9 +147,16 @@ export async function capScriptVersions(
   // Sort by version desc, delete oldest
   versions.sort((a, b) => b.version - a.version);
   const toDelete = versions.slice(MAX_SCRIPT_VERSIONS);
+  // Batch delete in a single transaction
+  const tx = db.transaction('script_versions', 'readwrite');
+  const store = tx.objectStore('script_versions');
   for (const v of toDelete) {
-    await deleteRecord(db, 'script_versions', v.id);
+    store.delete(v.id);
   }
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -181,9 +189,16 @@ export async function capRuns(
   const runs = await getRunsForTask(db, taskId);
   if (runs.length <= MAX_RUNS_PER_TASK) return;
   const toDelete = runs.slice(MAX_RUNS_PER_TASK);
+  // Batch delete in a single transaction
+  const tx = db.transaction('script_runs', 'readwrite');
+  const store = tx.objectStore('script_runs');
   for (const r of toDelete) {
-    await deleteRecord(db, 'script_runs', r.id);
+    store.delete(r.id);
   }
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -217,9 +232,16 @@ export async function capStateSnapshots(
   if (snapshots.length <= MAX_STATE_SNAPSHOTS_PER_TASK) return;
   snapshots.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const toDelete = snapshots.slice(MAX_STATE_SNAPSHOTS_PER_TASK);
+  // Batch delete in a single transaction
+  const tx = db.transaction('state_snapshots', 'readwrite');
+  const store = tx.objectStore('state_snapshots');
   for (const s of toDelete) {
-    await deleteRecord(db, 'state_snapshots', s.id);
+    store.delete(s.id);
   }
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +266,7 @@ export async function isNotificationRateLimited(
     'by_task_time',
     IDBKeyRange.bound([taskId, oneHourAgo], [taskId, '\uffff']),
   );
-  return recent.length >= 10; // MAX_NOTIFICATIONS_PER_TASK_PER_HOUR
+  return recent.length >= MAX_NOTIFICATIONS_PER_TASK_PER_HOUR;
 }
 
 // ---------------------------------------------------------------------------

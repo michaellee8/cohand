@@ -25,6 +25,8 @@ export interface ExecutionContext {
   releaseTab: (tabId: number, sessionId?: string) => void;
   cdp: CDPManager;
   ensureOffscreen: () => Promise<void>;
+  /** Optional callback invoked when taskTabMap is mutated, for write-through persistence. */
+  onTaskTabMapChange?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +81,7 @@ export async function executeTaskAsync(
 
     // Map task to tab
     taskTabMap.set(taskId, tabId);
+    ctx.onTaskTabMapChange?.();
     resetCumulativeReads(taskId);
 
     // Get task and active script
@@ -172,12 +175,19 @@ export async function executeTaskAsync(
       releaseTab(tabId);
     }
     taskTabMap.delete(taskId);
-    executionAbortControllers.delete(taskId);
+    // Only delete our own abort controller (a newer execution may have replaced it)
+    if (executionAbortControllers.get(taskId) === abortController) {
+      executionAbortControllers.delete(taskId);
+    }
 
     // Save run record
     if (runRecord) {
-      await addScriptRun(db, runRecord);
-      await capRuns(db, taskId);
+      try {
+        await addScriptRun(db, runRecord);
+        await capRuns(db, taskId);
+      } catch (err) {
+        console.error(`[Cohand] Failed to save run record for ${taskId}:`, err);
+      }
     }
   }
 }

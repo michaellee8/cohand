@@ -32,19 +32,19 @@ export class MessageRouter {
       console.warn(`[Cohand] No handler for message type: ${message.type}`);
       return { error: `Unknown message type: ${message.type}` };
     }
-    try {
-      return await (handler as any)(message, sender);
-    } catch (err) {
-      console.error(`[Cohand] Error handling ${message.type}:`, err);
-      return { error: String(err) };
-    }
+    return await (handler as any)(message, sender);
   }
 
   // Register as chrome.runtime.onMessage listener
   listen(): void {
     chrome.runtime.onMessage.addListener(
       (message: Message, sender, sendResponse) => {
-        this.handleMessage(message, sender).then(sendResponse);
+        this.handleMessage(message, sender)
+          .then(sendResponse)
+          .catch(err => {
+            console.error(`[Cohand] Error handling ${message.type}:`, err);
+            sendResponse({ error: err instanceof Error ? err.message : String(err) });
+          });
         return true; // async response
       },
     );

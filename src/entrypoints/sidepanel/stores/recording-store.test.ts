@@ -9,10 +9,21 @@ const SERVER_SESSION_ID = 'rec-server-uuid-1234';
 
 const mockSendMessage = vi.fn();
 const mockTabsSendMessage = vi.fn();
+const mockConnect = vi.fn();
+
+function createMockPort() {
+  return {
+    onMessage: { addListener: vi.fn() },
+    onDisconnect: { addListener: vi.fn() },
+    disconnect: vi.fn(),
+    name: 'recording-stream',
+  };
+}
 
 vi.stubGlobal('chrome', {
   runtime: {
     sendMessage: mockSendMessage,
+    connect: mockConnect,
   },
   tabs: {
     sendMessage: mockTabsSendMessage,
@@ -27,6 +38,7 @@ beforeEach(() => {
   // Default: START_RECORDING returns sessionId from server
   mockSendMessage.mockResolvedValue({ ok: true, sessionId: SERVER_SESSION_ID });
   mockTabsSendMessage.mockResolvedValue({ ok: true });
+  mockConnect.mockReturnValue(createMockPort());
 });
 
 describe('recording-store C5: sessionId from server', () => {

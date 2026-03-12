@@ -5,11 +5,12 @@ import {
   releaseTab,
   getTabOwner,
   resetTabOwnership,
+  releaseTabsForSession,
   executeRemoteCommand,
   isSensitiveScheme,
   type RemoteCommand,
 } from './remote-relay';
-import { createRemoteHandler, clearActiveSessions, getActiveSessionCount } from './remote-server';
+import { createRemoteHandler, clearActiveSessions, getActiveSessionCount, resetAuthRateLimits } from './remote-server';
 import { CDPManager } from '../cdp';
 
 // --- Mock chrome.storage.local ---
@@ -62,6 +63,7 @@ beforeEach(() => {
   };
   resetTabOwnership();
   clearActiveSessions();
+  resetAuthRateLimits();
 });
 
 // ========================
@@ -483,6 +485,11 @@ describe('remote-server', () => {
     const token = await getOrCreateToken();
     mockDebugger.sendCommand.mockResolvedValue({});
 
+    // Configure domain permissions
+    await mockStorage.local.set({
+      domainPermissions: [{ domain: 'example.com', addedAt: new Date().toISOString() }],
+    });
+
     // Auth and execute a command to claim the tab
     await callHandler({
       type: 'remote:auth',
@@ -773,6 +780,14 @@ describe('isSensitiveScheme', () => {
   it('returns false for http:// URLs', () => {
     expect(isSensitiveScheme('http://example.com')).toBe(false);
   });
+
+  it('identifies javascript: URLs as sensitive (C2)', () => {
+    expect(isSensitiveScheme('javascript:alert(1)')).toBe(true);
+  });
+
+  it('identifies data: URLs as sensitive (C2)', () => {
+    expect(isSensitiveScheme('data:text/html,<script>alert(1)</script>')).toBe(true);
+  });
 });
 
 // ========================
@@ -875,5 +890,362 @@ describe('executeRemoteCommand sensitive page blocking', () => {
     const result = await executeRemoteCommand(cdp, command, ['*'], getTabUrl);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('sensitive page');
+  });
+
+  it('blocks Page.navigate to javascript: URL (C2)', async () => {
+    getTabUrl.mockResolvedValue('https://example.com');
+
+    const command: RemoteCommand = {
+      id: 7,
+      method: 'Page.navigate',
+      params: { url: 'javascript:alert(1)' },
+      tabId: 10,
+    };
+
+    const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Navigation to sensitive URL blocked');
+  });
+
+  it('blocks Page.navigate to data: URL (C2)', async () => {
+    getTabUrl.mockResolvedValue('https://example.com');
+
+    const command: RemoteCommand = {
+      id: 8,
+      method: 'Page.navigate',
+      params: { url: 'data:text/html,<script>alert(1)</script>' },
+      tabId: 10,
+    };
+
+    const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Navigation to sensitive URL blocked');
+  });
+});
+
+// ========================
+// C1: validateToken rejects undefined stored token
+// ========================
+
+describe('validateToken undefined guard (C1)', () => {
+  it('rejects when no token is stored (prevents undefined===undefined)', async () => {
+    // Do NOT create a token — storage is empty
+    const valid = await validateToken(undefined as unknown as string);
+    expect(valid).toBe(false);
+  });
+
+  it('rejects empty string token when no token stored', async () => {
+    const valid = await validateToken('');
+    expect(valid).toBe(false);
+  });
+});
+
+// ========================
+// H6: releaseTabsForSession
+// ========================
+
+describe('releaseTabsForSession (H6)', () => {
+  it('releases all tabs for a session', () => {
+    claimTab(1, 'remote', 'session-A');
+    claimTab(2, 'remote', 'session-A');
+    claimTab(3, 'remote', 'session-B');
+
+    releaseTabsForSession('session-A');
+
+    expect(getTabOwner(1)).toBeNull();
+    expect(getTabOwner(2)).toBeNull();
+    expect(getTabOwner(3)).not.toBeNull();
+    expect(getTabOwner(3)?.sessionId).toBe('session-B');
+  });
+
+  it('does nothing if session has no tabs', () => {
+    claimTab(1, 'remote', 'session-X');
+    releaseTabsForSession('session-Y');
+    expect(getTabOwner(1)).not.toBeNull();
+  });
+});
+
+// ========================
+// H7: claimTab after validation
+// ========================
+
+describe('claimTab after validation (H7)', () => {
+  let cdp: CDPManager;
+  const getTabUrl = vi.fn<(tabId: number) => Promise<string>>();
+
+  beforeEach(() => {
+    cdp = new CDPManager();
+    getTabUrl.mockReset();
+  });
+
+  it('does not claim tab when domain validation fails', async () => {
+    getTabUrl.mockResolvedValue('https://evil.com');
+
+    const command: RemoteCommand = {
+      id: 1,
+      method: 'DOM.getDocument',
+      tabId: 50,
+    };
+
+    const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+    expect(result.ok).toBe(false);
+    // Tab should NOT be claimed since validation failed before claimTab
+    expect(getTabOwner(50)).toBeNull();
+  });
+
+  it('does not claim tab when sensitive scheme check fails', async () => {
+    getTabUrl.mockResolvedValue('chrome://settings');
+
+    const command: RemoteCommand = {
+      id: 2,
+      method: 'DOM.getDocument',
+      tabId: 51,
+    };
+
+    const result = await executeRemoteCommand(cdp, command, ['*'], getTabUrl);
+    expect(result.ok).toBe(false);
+    expect(getTabOwner(51)).toBeNull();
+  });
+
+  it('releases tab when CDP execution throws after claim', async () => {
+    getTabUrl.mockResolvedValue('https://example.com');
+    await cdp.attach(60);
+    mockDebugger.sendCommand.mockClear();
+    mockDebugger.sendCommand.mockRejectedValueOnce(new Error('CDP crashed'));
+
+    const command: RemoteCommand = {
+      id: 3,
+      method: 'DOM.getDocument',
+      tabId: 60,
+    };
+
+    const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl, 'sess-1');
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('CDP crashed');
+    // Tab should be released after the error
+    expect(getTabOwner(60)).toBeNull();
+  });
+});
+
+// ========================
+// H8: regenerateToken clears active sessions
+// ========================
+
+describe('regenerateToken clears sessions (H8)', () => {
+  it('clears active sessions when token is regenerated', async () => {
+    const token = await getOrCreateToken();
+    // Simulate an active session by directly adding (or going through handler)
+    const cdp = new CDPManager();
+    const getTabUrl = vi.fn<(tabId: number) => Promise<string>>().mockResolvedValue('https://example.com');
+    const handler = createRemoteHandler(cdp, getTabUrl);
+
+    // Authenticate
+    await new Promise<void>((resolve) => {
+      const sender = { id: 'ext-test' } as chrome.runtime.MessageSender;
+      handler({ type: 'remote:auth', token, allowedDomains: ['example.com'] }, sender, () => resolve());
+    });
+    expect(getActiveSessionCount()).toBe(1);
+
+    // Regenerate token — should clear sessions
+    await regenerateToken();
+    expect(getActiveSessionCount()).toBe(0);
+  });
+});
+
+// ========================
+// H10: taskId in local tab claims
+// ========================
+
+describe('taskId in local tab claims (H10)', () => {
+  it('stores taskId for local claims', () => {
+    const claimed = claimTab(100, 'local', undefined, 'task-abc');
+    expect(claimed).toBe(true);
+    const owner = getTabOwner(100);
+    expect(owner?.owner).toBe('local');
+    expect(owner?.taskId).toBe('task-abc');
+  });
+
+  it('does not store taskId for remote claims', () => {
+    const claimed = claimTab(101, 'remote', 'session-1', 'task-xyz');
+    expect(claimed).toBe(true);
+    const owner = getTabOwner(101);
+    expect(owner?.owner).toBe('remote');
+    expect(owner?.taskId).toBeUndefined();
+  });
+
+  it('local claim without taskId has no taskId', () => {
+    const claimed = claimTab(102, 'local');
+    expect(claimed).toBe(true);
+    const owner = getTabOwner(102);
+    expect(owner?.taskId).toBeUndefined();
+  });
+});
+
+// ========================
+// M2: Session expiry with idle timeout
+// ========================
+
+describe('session idle timeout (M2)', () => {
+  let cdp: CDPManager;
+  let handler: ReturnType<typeof createRemoteHandler>;
+  const getTabUrl = vi.fn<(tabId: number) => Promise<string>>();
+
+  beforeEach(async () => {
+    cdp = new CDPManager();
+    getTabUrl.mockResolvedValue('https://example.com');
+    handler = createRemoteHandler(cdp, getTabUrl);
+    await getOrCreateToken();
+  });
+
+  function callHandler(message: any, senderId?: string): Promise<any> {
+    return new Promise((resolve) => {
+      const sender = { id: senderId ?? 'test-ext' } as chrome.runtime.MessageSender;
+      handler(message, sender, resolve);
+    });
+  }
+
+  it('expires session after idle timeout', async () => {
+    const token = await getOrCreateToken();
+    await callHandler({ type: 'remote:auth', token, allowedDomains: ['example.com'] });
+    expect(getActiveSessionCount()).toBe(1);
+
+    // Fast-forward time past the 30-minute timeout
+    const originalNow = Date.now;
+    Date.now = () => originalNow() + 31 * 60 * 1000;
+
+    try {
+      const response = await callHandler({
+        type: 'remote:command',
+        id: 1,
+        method: 'DOM.getDocument',
+        tabId: 10,
+      });
+      expect(response).toEqual({ ok: false, error: 'Session expired' });
+      expect(getActiveSessionCount()).toBe(0);
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+});
+
+// ========================
+// M3: Rate limiting on auth attempts
+// ========================
+
+describe('auth rate limiting (M3)', () => {
+  let cdp: CDPManager;
+  let handler: ReturnType<typeof createRemoteHandler>;
+  const getTabUrl = vi.fn<(tabId: number) => Promise<string>>();
+
+  beforeEach(async () => {
+    cdp = new CDPManager();
+    getTabUrl.mockResolvedValue('https://example.com');
+    handler = createRemoteHandler(cdp, getTabUrl);
+    await getOrCreateToken();
+  });
+
+  function callHandler(message: any, senderId?: string): Promise<any> {
+    return new Promise((resolve) => {
+      const sender = { id: senderId ?? 'rate-test-ext' } as chrome.runtime.MessageSender;
+      handler(message, sender, resolve);
+    });
+  }
+
+  it('rate limits after 5 failed auth attempts', async () => {
+    // Make 5 failed attempts
+    for (let i = 0; i < 5; i++) {
+      const response = await callHandler({ type: 'remote:auth', token: 'wrong-token' });
+      expect(response).toEqual({ ok: false, error: 'Invalid token' });
+    }
+
+    // 6th attempt should be rate limited
+    const response = await callHandler({ type: 'remote:auth', token: 'wrong-token' });
+    expect(response).toEqual({ ok: false, error: 'Rate limited' });
+  });
+
+  it('does not rate limit valid auth attempts', async () => {
+    const token = await getOrCreateToken();
+
+    // Make a few failed attempts (fewer than limit)
+    for (let i = 0; i < 3; i++) {
+      await callHandler({ type: 'remote:auth', token: 'wrong-token' });
+    }
+
+    // Valid auth should still work
+    const response = await callHandler({ type: 'remote:auth', token, allowedDomains: ['example.com'] });
+    expect(response).toEqual({ ok: true });
+  });
+
+  it('rate limit resets after window expires', async () => {
+    // Make 5 failed attempts
+    for (let i = 0; i < 5; i++) {
+      await callHandler({ type: 'remote:auth', token: 'wrong-token' });
+    }
+
+    // Should be rate limited
+    let response = await callHandler({ type: 'remote:auth', token: 'wrong-token' });
+    expect(response).toEqual({ ok: false, error: 'Rate limited' });
+
+    // Fast-forward time past the 1-minute window
+    const originalNow = Date.now;
+    Date.now = () => originalNow() + 61 * 1000;
+
+    try {
+      // Should no longer be rate limited
+      response = await callHandler({ type: 'remote:auth', token: 'wrong-token' });
+      expect(response).toEqual({ ok: false, error: 'Invalid token' });
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+});
+
+// ========================
+// H6: disconnect releases tabs for session (integration)
+// ========================
+
+describe('disconnect releases tabs (H6 integration)', () => {
+  let cdp: CDPManager;
+  let handler: ReturnType<typeof createRemoteHandler>;
+  const getTabUrl = vi.fn<(tabId: number) => Promise<string>>();
+
+  beforeEach(async () => {
+    cdp = new CDPManager();
+    getTabUrl.mockResolvedValue('https://example.com');
+    handler = createRemoteHandler(cdp, getTabUrl);
+    await getOrCreateToken();
+
+    // Configure domain permissions
+    await mockStorage.local.set({
+      domainPermissions: [{ domain: 'example.com', addedAt: new Date().toISOString() }],
+    });
+  });
+
+  function callHandler(message: any, senderId?: string): Promise<any> {
+    return new Promise((resolve) => {
+      const sender = { id: senderId ?? 'ext-disconnect' } as chrome.runtime.MessageSender;
+      handler(message, sender, resolve);
+    });
+  }
+
+  it('releases all tabs when session disconnects', async () => {
+    const token = await getOrCreateToken();
+    mockDebugger.sendCommand.mockResolvedValue({});
+
+    // Auth and claim tabs
+    await callHandler({ type: 'remote:auth', token, allowedDomains: ['example.com'] });
+    await callHandler({ type: 'remote:command', id: 1, method: 'DOM.getDocument', tabId: 40 });
+    await callHandler({ type: 'remote:command', id: 2, method: 'DOM.getDocument', tabId: 41 });
+
+    expect(getTabOwner(40)?.sessionId).toBe('ext-disconnect');
+    expect(getTabOwner(41)?.sessionId).toBe('ext-disconnect');
+
+    // Disconnect
+    await callHandler({ type: 'remote:disconnect' });
+
+    // Both tabs should be released
+    expect(getTabOwner(40)).toBeNull();
+    expect(getTabOwner(41)).toBeNull();
+    expect(getActiveSessionCount()).toBe(0);
   });
 });

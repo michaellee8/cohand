@@ -9,7 +9,18 @@ vi.mock('@mariozechner/pi-ai', () => ({
 }));
 
 function createMockModel(id: string) {
-  return { id };
+  return {
+    id,
+    name: id,
+    api: 'test',
+    provider: 'test',
+    baseUrl: '',
+    reasoning: false,
+    input: ['text'] as ('text' | 'image')[],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 16384,
+  };
 }
 
 function makeAssistantMessage(text: string) {

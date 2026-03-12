@@ -19,6 +19,9 @@ const BLOCKED_MEMBERS = new Set([
   'evaluate', '$', '$$', 'content',
   'mouse', 'keyboard', 'route',
   'exposeFunction', 'addInitScript',
+  'getPrototypeOf', 'getOwnPropertyDescriptor',
+  'defineProperty', 'setPrototypeOf',
+  'getOwnPropertyNames', 'getOwnPropertySymbols',
 ]);
 
 export function validateAST(source: string): ASTValidationResult {

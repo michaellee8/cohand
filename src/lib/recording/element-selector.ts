@@ -4,7 +4,7 @@
  * activate()  -- start capturing user interactions
  * deactivate() -- tear down all listeners and DOM artifacts
  *
- * Sends RECORDING_ACTION and KEYSTROKE_UPDATE messages to the
+ * Sends RECORDING_ACTION messages to the
  * service worker via chrome.runtime.sendMessage.
  */
 
@@ -46,7 +46,7 @@ function getImplicitRole(el: Element): string {
 
 function getAccessibleName(el: Element): string | undefined {
   const ariaLabel = el.getAttribute('aria-label');
-  if (ariaLabel) return ariaLabel;
+  if (ariaLabel) return ariaLabel.slice(0, 500);
 
   const ariaLabelledBy = el.getAttribute('aria-labelledby');
   if (ariaLabelledBy) {
@@ -160,23 +160,6 @@ function sendAction(action: RawRecordingAction): void {
   chrome.runtime.sendMessage({ type: 'RECORDING_ACTION', action });
 }
 
-function sendKeystrokeUpdate(
-  text: string,
-  el: Element,
-  isFinal: boolean,
-): void {
-  chrome.runtime.sendMessage({
-    type: 'KEYSTROKE_UPDATE',
-    text,
-    element: {
-      selector: buildCssSelector(el),
-      tag: el.tagName.toLowerCase(),
-      name: el.getAttribute('name') || undefined,
-    },
-    isFinal,
-  });
-}
-
 // Allowlist of element attributes safe to capture during recording.
 // All other attributes are filtered out to prevent leaking sensitive data
 // (e.g. data-user-id, data-token, internal framework attributes).
@@ -191,6 +174,11 @@ function collectElementMeta(el: Element): Partial<RawRecordingAction> {
     if (ALLOWED_ATTRIBUTES.has(attr.name)) {
       attrs[attr.name] = attr.value;
     }
+  }
+
+  // Strip value attribute for sensitive inputs (passwords, credit cards, etc.)
+  if (isSensitiveInput(el)) {
+    delete attrs['value'];
   }
 
   return {
@@ -281,13 +269,18 @@ function onKeyDown(e: KeyboardEvent): void {
     keystrokeBuffer += '\n';
   }
 
-  // Send live update (redacted if sensitive)
-  const sensitive = isSensitiveInput(target);
-  sendKeystrokeUpdate(
-    sensitive ? '' : keystrokeBuffer,
-    target,
-    false,
-  );
+}
+
+function onInput(e: Event): void {
+  const target = e.target;
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+  if (!active) return;
+
+  // Update keystroke buffer with the actual input value
+  if (keystrokeTarget === target) {
+    const sensitive = isSensitiveInput(target);
+    keystrokeBuffer = sensitive ? '' : target.value;
+  }
 }
 
 function onFocusOut(e: FocusEvent): void {
@@ -322,9 +315,6 @@ function flushKeystrokeBuffer(): void {
   };
 
   sendAction(action);
-
-  // Send final keystroke update too
-  sendKeystrokeUpdate(sensitive ? '' : keystrokeBuffer, el, true);
 
   keystrokeTarget = null;
   keystrokeBuffer = '';
@@ -364,6 +354,7 @@ export function activate(): void {
   document.addEventListener('mouseout', onMouseOut, true);
   document.addEventListener('click', onClick, true);
   document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('input', onInput, true);
   document.addEventListener('focusout', onFocusOut, true);
 }
 
@@ -380,6 +371,7 @@ export function deactivate(): void {
   document.removeEventListener('mouseout', onMouseOut, true);
   document.removeEventListener('click', onClick, true);
   document.removeEventListener('keydown', onKeyDown, true);
+  document.removeEventListener('input', onInput, true);
   document.removeEventListener('focusout', onFocusOut, true);
 
   if (highlightEl) {

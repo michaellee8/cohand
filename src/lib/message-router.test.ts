@@ -18,13 +18,14 @@ describe('MessageRouter', () => {
     expect(result).toHaveProperty('error');
   });
 
-  it('catches handler errors', async () => {
+  it('propagates handler errors', async () => {
     const router = new MessageRouter();
     router.on('GET_TASKS', async () => {
       throw new Error('boom');
     });
-    const result = await router.handleMessage({ type: 'GET_TASKS' }, {} as any);
-    expect(result).toHaveProperty('error');
+    await expect(
+      router.handleMessage({ type: 'GET_TASKS' }, {} as any),
+    ).rejects.toThrow('boom');
   });
 
   it('passes message and sender to handler', async () => {

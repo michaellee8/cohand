@@ -57,8 +57,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         codexAccountId: codexOAuth?.accountId ?? null,
         loading: false,
       });
-    } catch (err: any) {
-      set({ loading: false, error: err.message });
+    } catch (err: unknown) {
+      set({ loading: false, error: err instanceof Error ? err.message : String(err) });
     }
   },
 
@@ -70,8 +70,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       await setSettings(newSettings);
       set({ settings: newSettings, saving: false });
-    } catch (err: any) {
-      set({ saving: false, error: err.message });
+    } catch (err: unknown) {
+      set({ saving: false, error: err instanceof Error ? err.message : String(err) });
     }
   },
 
@@ -90,8 +90,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const encrypted = await encrypt(key, apiKey);
       await setEncryptedTokens({ apiKey: encrypted });
       set({ hasApiKey: true, saving: false });
-    } catch (err: any) {
-      set({ saving: false, error: err.message });
+    } catch (err: unknown) {
+      set({ saving: false, error: err instanceof Error ? err.message : String(err) });
     }
   },
 
@@ -99,13 +99,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       await setEncryptedTokens({});
       set({ hasApiKey: false });
-    } catch (err: any) {
-      set({ error: err.message });
+    } catch (err: unknown) {
+      set({ error: err instanceof Error ? err.message : String(err) });
     }
   },
 
   addDomain: async (domain: string) => {
     try {
+      // Check if domain already exists locally
+      if (get().domainPermissions.some(p => p.domain === domain)) return;
+
       const permission: DomainPermission = {
         domain,
         grantedAt: new Date().toISOString(),
@@ -115,8 +118,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set(state => ({
         domainPermissions: [...state.domainPermissions, permission],
       }));
-    } catch (err: any) {
-      set({ error: err.message });
+    } catch (err: unknown) {
+      set({ error: err instanceof Error ? err.message : String(err) });
     }
   },
 
@@ -126,8 +129,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set(state => ({
         domainPermissions: state.domainPermissions.filter(p => p.domain !== domain),
       }));
-    } catch (err: any) {
-      set({ error: err.message });
+    } catch (err: unknown) {
+      set({ error: err instanceof Error ? err.message : String(err) });
     }
   },
 
@@ -172,8 +175,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
 
       set({ codexConnected: true, codexAccountId: tokens.account_id, hasApiKey: true, saving: false });
-    } catch (err: any) {
-      set({ saving: false, error: err.message });
+    } catch (err: unknown) {
+      set({ saving: false, error: err instanceof Error ? err.message : String(err) });
     }
   },
 }));

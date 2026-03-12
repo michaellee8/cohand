@@ -5,6 +5,8 @@ import { getSettings } from '../../../lib/storage';
 import type { RecordingSession } from '../../../types/recording';
 import { buildRecordingGenerationMessages, parseGenerationOutput } from '../../../lib/recording/recording-prompts';
 
+const WELCOME_MESSAGE = 'Welcome to Cohand! Describe what you want to automate, and I\'ll help you create a task.';
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -35,7 +37,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [{
     id: 'welcome',
     role: 'assistant',
-    content: 'Welcome to Cohand! Describe what you want to automate, and I\'ll help you create a task.',
+    content: WELCOME_MESSAGE,
     timestamp: Date.now(),
   }],
   isStreaming: false,
@@ -58,7 +60,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (content: string) => {
-    const { model, apiKey, messages } = get();
+    const { model, apiKey, messages, abortController: existingController } = get();
+
+    // Abort any existing stream before starting new one
+    if (existingController) {
+      existingController.abort();
+    }
 
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -107,13 +114,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       for await (const event of result) {
         if (event.type === 'text_delta') {
           fullContent += event.delta;
-          set(state => ({
-            messages: state.messages.map(m =>
-              m.id === assistantMessage.id
-                ? { ...m, content: fullContent }
-                : m
-            ),
-          }));
+          set(state => {
+            const msgs = [...state.messages];
+            const lastIdx = msgs.length - 1;
+            msgs[lastIdx] = { ...msgs[lastIdx], content: fullContent };
+            return { messages: msgs };
+          });
         }
       }
 
@@ -164,12 +170,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [{
         id: 'welcome',
         role: 'assistant',
-        content: 'Welcome to Cohand! Describe what you want to automate, and I\'ll help you create a task.',
+        content: WELCOME_MESSAGE,
         timestamp: Date.now(),
       }],
       isStreaming: false,
       error: null,
       abortController: null,
+      model: null,
+      apiKey: null,
+      generatedScript: null,
+      generatedDescription: null,
     });
   },
 

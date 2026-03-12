@@ -123,7 +123,7 @@ function buildWrapperScript(source: string, taskId: string): string {
 
   var result = undefined;
   if (typeof run === 'function') {
-    result = run(page, context);
+    result = await run(page, context);
   }
 
   // Return JSON-encoded result and state
@@ -151,8 +151,26 @@ function hostValueToHandle(ctx: QuickJSAsyncContext, value: unknown): QuickJSHan
   if (typeof value === 'boolean') {
     return value ? ctx.true : ctx.false;
   }
-  // For objects/arrays, serialize to JSON and parse inside QuickJS
-  return ctx.newString(JSON.stringify(value));
+  if (Array.isArray(value)) {
+    const arr = ctx.newArray();
+    for (let i = 0; i < value.length; i++) {
+      const elemHandle = hostValueToHandle(ctx, value[i]);
+      ctx.setProp(arr, i, elemHandle);
+      elemHandle.dispose();
+    }
+    return arr;
+  }
+  if (typeof value === 'object') {
+    const obj = ctx.newObject();
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const valHandle = hostValueToHandle(ctx, v);
+      ctx.setProp(obj, k, valHandle);
+      valHandle.dispose();
+    }
+    return obj;
+  }
+  // Fallback for unknown types
+  return ctx.newString(String(value));
 }
 
 /**

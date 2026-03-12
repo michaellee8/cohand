@@ -38,6 +38,21 @@ function makeAssistantMessage(text: string) {
 
 const TEST_API_KEY = 'test-api-key';
 
+function createMockModel(id: string) {
+  return {
+    id,
+    name: id,
+    api: 'test',
+    provider: 'test',
+    baseUrl: '',
+    reasoning: false,
+    input: ['text'] as ('text' | 'image')[],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 16384,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Chrome API mocks
 // ---------------------------------------------------------------------------
@@ -328,8 +343,8 @@ describe('Security review integration', () => {
   });
 
   it('dual review approves safe script', async () => {
-    const model1 = { id: 'test-model' };
-    const model2 = { id: 'test-model' };
+    const model1 = createMockModel('test-model');
+    const model2 = createMockModel('test-model');
 
     mockComplete
       .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })))
@@ -346,8 +361,8 @@ describe('Security review integration', () => {
   });
 
   it('dual review rejects when one model rejects', async () => {
-    const model1 = { id: 'approver' };
-    const model2 = { id: 'rejector' };
+    const model1 = createMockModel('approver');
+    const model2 = createMockModel('rejector');
 
     mockComplete
       .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ approved: true, issues: [] })))
@@ -366,8 +381,8 @@ describe('Security review integration', () => {
   });
 
   it('fails closed on LLM error', async () => {
-    const model1 = { id: 'error-model' };
-    const model2 = { id: 'error-model' };
+    const model1 = createMockModel('error-model');
+    const model2 = createMockModel('error-model');
 
     mockComplete
       .mockRejectedValueOnce(new Error('API error'))
@@ -384,8 +399,8 @@ describe('Security review integration', () => {
   });
 
   it('fails closed on malformed response', async () => {
-    const model1 = { id: 'bad-model' };
-    const model2 = { id: 'bad-model' };
+    const model1 = createMockModel('bad-model');
+    const model2 = createMockModel('bad-model');
 
     mockComplete
       .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ wrong: 'format' })))
@@ -434,8 +449,8 @@ async function run(page, context) {
     expect(astResult.valid).toBe(true);
 
     // 4. Security review (mocked)
-    const mockReviewModel1 = { id: 'gpt-5.4' };
-    const mockReviewModel2 = { id: 'gpt-5.4' };
+    const mockReviewModel1 = createMockModel('gpt-5.4');
+    const mockReviewModel2 = createMockModel('gpt-5.4');
 
     mockComplete.mockReset();
     mockComplete

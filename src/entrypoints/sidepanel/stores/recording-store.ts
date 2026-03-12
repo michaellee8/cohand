@@ -7,6 +7,7 @@ interface RecordingState {
   session: RecordingSession | null;
   voiceEnabled: boolean;
   error: string | null;
+  _port: chrome.runtime.Port | null;
 
   startRecording: (tabId: number) => Promise<void>;
   stopRecording: () => Promise<void>;
@@ -25,8 +26,12 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
   session: null,
   voiceEnabled: false,
   error: null,
+  _port: null,
 
   startRecording: async (tabId: number) => {
+    // Guard against concurrent starts
+    if (get().isRecording) return;
+
     set({ isRecording: true, isPaused: false, session: null, error: null });
 
     let sessionId: string;
@@ -46,7 +51,23 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
       pageSnapshots: {},
       steps: [],
     };
-    set({ session });
+
+    // Connect recording port (managed by store, survives page navigation)
+    const port = chrome.runtime.connect({ name: 'recording-stream' });
+    port.onMessage.addListener((msg: { type: string; step?: RecordingStep; snapshotKey?: string; tree?: unknown }) => {
+      if (msg.type === 'RECORDING_STEP' && msg.step) {
+        get().appendStep(msg.step);
+      }
+      if (msg.type === 'PAGE_SNAPSHOT' && msg.snapshotKey) {
+        get().addPageSnapshot(msg.snapshotKey, msg.tree);
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      set({ _port: null });
+    });
+
+    set({ session, _port: port });
+
     // Content script activation is best-effort — recording still works
     // even if the content script isn't loaded (e.g. on restricted pages).
     try {
@@ -58,7 +79,7 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
   },
 
   stopRecording: async () => {
-    const { session } = get();
+    const { session, _port } = get();
     if (!session) return;
     // Deactivate content script (best-effort, may fail on restricted pages)
     try {
@@ -68,9 +89,16 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
     try {
       await chrome.runtime.sendMessage({ type: 'STOP_RECORDING', sessionId: session.id });
     } catch (e) { console.warn('[Cohand] Could not notify stop recording:', String(e)); }
+
+    // Disconnect port
+    if (_port) {
+      try { _port.disconnect(); } catch { /* already disconnected */ }
+    }
+
     set(state => ({
       isRecording: false,
       isPaused: false,
+      _port: null,
       session: state.session ? { ...state.session, completedAt: new Date().toISOString() } : null,
     }));
   },
@@ -108,5 +136,9 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
     return { session: { ...state.session, pageSnapshots: { ...state.session.pageSnapshots, [snapshotKey]: tree as any } } };
   }),
 
-  reset: () => set({ isRecording: false, isPaused: false, session: null, voiceEnabled: false, error: null }),
+  reset: () => {
+    const { _port } = get();
+    if (_port) { try { _port.disconnect(); } catch { /* already disconnected */ } }
+    set({ isRecording: false, isPaused: false, session: null, voiceEnabled: false, error: null, _port: null });
+  },
 }));

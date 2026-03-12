@@ -1,6 +1,6 @@
 import { complete } from '@mariozechner/pi-ai';
-import type { Context, Message, UserMessage, AssistantMessage } from '@mariozechner/pi-ai';
 import type { ModelLike } from './pi-ai-bridge';
+import { toContext, extractText } from './llm-helpers';
 import { validateAST } from './security/ast-validator';
 import { buildGenerationMessages, buildRepairMessages } from './explorer-prompts';
 
@@ -15,66 +15,6 @@ export interface ScriptGenerationResult {
   source: string;
   astValid: boolean;
   astErrors: string[];
-}
-
-/**
- * Convert the messages array from buildGenerationMessages / buildRepairMessages
- * into a pi-ai Context object (systemPrompt + messages).
- */
-function toContext(
-  rawMessages: Array<{ role: string; content: string | Array<{ type: string; [key: string]: any }> }>,
-): Context {
-  let systemPrompt: string | undefined;
-  const messages: Message[] = [];
-
-  for (const msg of rawMessages) {
-    if (msg.role === 'system') {
-      systemPrompt = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-    } else if (msg.role === 'user') {
-      const content = typeof msg.content === 'string'
-        ? msg.content
-        : JSON.stringify(msg.content);
-      messages.push({ role: 'user', content, timestamp: Date.now() } as UserMessage);
-    }
-  }
-
-  return { systemPrompt, messages };
-}
-
-/**
- * Extract the text content from a pi-ai AssistantMessage.
- */
-function extractText(result: AssistantMessage): string {
-  const textParts = result.content
-    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-    .map((part) => part.text);
-  return textParts.join('');
-}
-
-/**
- * Observe a page by getting its a11y tree and screenshot.
- * Uses message passing to content script and chrome.tabs API.
- */
-export async function observePage(tabId: number): Promise<ExplorationResult> {
-  // Get a11y tree from content script
-  const tree = await chrome.runtime.sendMessage({ type: 'GET_A11Y_TREE', tabId });
-
-  // Get screenshot
-  const tab = await chrome.tabs.get(tabId);
-  let screenshot: string | undefined;
-  try {
-    screenshot = await chrome.tabs.captureVisibleTab(tab.windowId!, { format: 'png' });
-  } catch (e) {
-    // Screenshot may fail on restricted pages — propagate as warning but don't block
-    console.warn('[Cohand] Screenshot capture failed:', String(e));
-  }
-
-  return {
-    a11yTree: JSON.stringify(tree, null, 2),
-    screenshot,
-    url: tab.url || '',
-    title: tab.title || '',
-  };
 }
 
 /**

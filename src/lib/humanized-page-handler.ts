@@ -142,6 +142,22 @@ export function registerPageMethods(
       const [url] = rpc.args.args as [string];
       const tabId = ctx.getTabId(rpc.taskId)!;
 
+      // Block dangerous URL schemes
+      const BLOCKED_GOTO_SCHEMES = ['javascript:', 'data:', 'file:', 'blob:', 'vbscript:'];
+      try {
+        const parsed = new URL(url);
+        if (BLOCKED_GOTO_SCHEMES.some(s => parsed.protocol === s)) {
+          throw new Error(`Navigation to ${parsed.protocol} URLs is blocked`);
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('blocked')) throw e;
+        // URL parsing failed — check prefix directly
+        const lower = url.toLowerCase().trim();
+        if (BLOCKED_GOTO_SCHEMES.some(s => lower.startsWith(s))) {
+          throw new Error(`Navigation to dangerous URL scheme is blocked`);
+        }
+      }
+
       // Validate target URL domain
       const allowedDomains = await ctx.getAllowedDomains(rpc.taskId);
       if (!isDomainAllowed(url, allowedDomains)) {
@@ -264,6 +280,10 @@ export function registerPageMethods(
       const start = Date.now();
 
       while (Date.now() - start < timeout) {
+        // Check if task is still active
+        if (ctx.getTabId(rpc.taskId) === undefined) {
+          throw new Error('Task execution cancelled');
+        }
         try {
           await resolveSelector(ctx.cdp, tabId, selector);
           return undefined;
@@ -278,9 +298,21 @@ export function registerPageMethods(
   // waitForLoadState
   handler.register(
     'waitForLoadState',
-    makeHandler(async () => {
-      // Simple wait -- in real implementation would listen to CDP Page events
-      await new Promise((r) => setTimeout(r, 1000));
+    makeHandler(async (rpc, ctx) => {
+      const tabId = ctx.getTabId(rpc.taskId)!;
+      const timeout = 10000; // 10 seconds max
+      const start = Date.now();
+
+      // Poll page load state via CDP
+      while (Date.now() - start < timeout) {
+        try {
+          const metrics = (await ctx.cdp.send(tabId, 'Page.getLayoutMetrics')) as Record<string, unknown>;
+          if (metrics) return undefined; // Page is responsive
+        } catch {
+          // Page still loading — wait and retry
+        }
+        await new Promise(r => setTimeout(r, 200));
+      }
       return undefined;
     }),
   );
@@ -468,6 +500,8 @@ export function registerPageMethods(
   );
 
   // notify -- special method, not a page action.
+  // TODO: Wire to actual notification delivery (deliverNotification in notifications.ts).
+  // Currently a stub that acknowledges the notification without persisting it.
   // Registered directly (no makeHandler) because notify doesn't interact with
   // the page and should not require domain validation.
   handler.register('notify', async (rpc) => {

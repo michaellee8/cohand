@@ -38,7 +38,7 @@ export function TasksPage() {
     return (
       <TaskDetail
         task={selectedTask}
-        runs={runs.get(selectedTask.id) || []}
+        runs={runs[selectedTask.id] || []}
         onClose={() => selectTask(null)}
         onDelete={deleteTask}
       />

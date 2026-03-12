@@ -15,11 +15,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SandboxBridge, type ExecuteScriptResult } from './sandbox-bridge';
 import { RPCHandler } from './rpc-handler';
-import { executeScript, type HostCallFn } from './script-executor';
 
 // ---------------------------------------------------------------------------
 // Chrome API mocks
 // ---------------------------------------------------------------------------
+const FAKE_EXTENSION_ORIGIN = 'https://fake-extension-id.chromiumapp.org';
+
 function setupChromeMock() {
   (globalThis as any).chrome = {
     runtime: {
@@ -30,197 +31,13 @@ function setupChromeMock() {
         disconnect: vi.fn(),
       })),
       onConnect: { addListener: vi.fn() },
+      getURL: vi.fn((path: string) => `${FAKE_EXTENSION_ORIGIN}/${path}`),
     },
   };
 }
 
 beforeEach(() => {
   setupChromeMock();
-});
-
-// ---------------------------------------------------------------------------
-// Script Executor tests (the core execution engine)
-// ---------------------------------------------------------------------------
-
-describe('Script execution with RPC bridge', () => {
-  it('executes a script that calls page.goto', async () => {
-    const calls: { method: string; args: unknown }[] = [];
-    const hostCall: HostCallFn = async (method, args) => {
-      calls.push({ method, args });
-      return undefined;
-    };
-
-    const source = `
-      async function run(page, context) {
-        await page.goto('https://example.com');
-        return { visited: true };
-      }
-    `;
-
-    const result = await executeScript(source, 'task-1', hostCall, {});
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.result).toEqual({ visited: true });
-      expect(calls).toHaveLength(1);
-      expect(calls[0].method).toBe('goto');
-    }
-  });
-
-  it('executes a script that uses page.click', async () => {
-    const calls: { method: string; args: unknown }[] = [];
-    const hostCall: HostCallFn = async (method, args) => {
-      calls.push({ method, args });
-      return undefined;
-    };
-
-    const source = `
-      async function run(page, context) {
-        await page.click('[aria-label="Like"]');
-        return { clicked: true };
-      }
-    `;
-
-    const result = await executeScript(source, 'task-1', hostCall, {});
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(calls[0].method).toBe('click');
-      expect((calls[0].args as any).args[0]).toBe('[aria-label="Like"]');
-    }
-  });
-
-  it('executes a script that reads and writes state', async () => {
-    const hostCall: HostCallFn = async () => undefined;
-
-    const source = `
-      async function run(page, context) {
-        const prev = context.state.counter || 0;
-        context.state.counter = prev + 1;
-        return { counter: context.state.counter };
-      }
-    `;
-
-    const result = await executeScript(source, 'task-1', hostCall, { counter: 5 });
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.result).toEqual({ counter: 6 });
-      expect(result.state.counter).toBe(6);
-    }
-  });
-
-  it('handles script errors gracefully', async () => {
-    const hostCall: HostCallFn = async () => undefined;
-
-    const source = `
-      async function run(page, context) {
-        throw new Error('Script failed');
-      }
-    `;
-
-    const result = await executeScript(source, 'task-1', hostCall, {});
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('Script failed');
-    }
-  });
-
-  it('handles RPC errors from host calls', async () => {
-    const hostCall: HostCallFn = async () => {
-      throw new Error('Selector not found: .nonexistent');
-    };
-
-    const source = `
-      async function run(page, context) {
-        await page.click('.nonexistent');
-      }
-    `;
-
-    const result = await executeScript(source, 'task-1', hostCall, {});
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('Selector not found');
-    }
-  });
-
-  it('executes script with locator pattern', async () => {
-    const calls: { method: string; args: unknown }[] = [];
-    const hostCall: HostCallFn = async (method, args) => {
-      calls.push({ method, args });
-      if (method === 'locator_action') {
-        const a = args as any;
-        if (a.actionMethod === 'textContent') return 'Hello World';
-      }
-      return undefined;
-    };
-
-    const source = `
-      async function run(page, context) {
-        const text = await page.locator('.heading').textContent();
-        return { text };
-      }
-    `;
-
-    const result = await executeScript(source, 'task-1', hostCall, {});
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.result).toEqual({ text: 'Hello World' });
-      expect(calls[0].method).toBe('locator_action');
-      expect((calls[0].args as any).locatorMethod).toBe('locator');
-      expect((calls[0].args as any).actionMethod).toBe('textContent');
-    }
-  });
-
-  it('executes script with getByRole pattern', async () => {
-    const calls: { method: string; args: unknown }[] = [];
-    const hostCall: HostCallFn = async (method, args) => {
-      calls.push({ method, args });
-      return undefined;
-    };
-
-    const source = `
-      async function run(page, context) {
-        await page.getByRole('button', 'Submit').click();
-        return { done: true };
-      }
-    `;
-
-    const result = await executeScript(source, 'task-1', hostCall, {});
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(calls[0].method).toBe('locator_action');
-      expect((calls[0].args as any).locatorMethod).toBe('getByRole');
-      expect((calls[0].args as any).locatorArgs).toEqual(['button', 'Submit']);
-      expect((calls[0].args as any).actionMethod).toBe('click');
-    }
-  });
-
-  it('executes script with notify', async () => {
-    const calls: { method: string; args: unknown }[] = [];
-    const hostCall: HostCallFn = async (method, args) => {
-      calls.push({ method, args });
-      return undefined;
-    };
-
-    const source = `
-      async function run(page, context) {
-        await context.notify('Price changed');
-        return { notified: true };
-      }
-    `;
-
-    const result = await executeScript(source, 'task-1', hostCall, {});
-
-    expect(result.ok).toBe(true);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].method).toBe('notify');
-    expect((calls[0].args as any).message).toBe('Price changed');
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -368,7 +185,7 @@ describe('SandboxBridge execution flow', () => {
         taskId: 'task-1',
         source: expect.stringContaining('run'),
       }),
-      '*',
+      FAKE_EXTENSION_ORIGIN,
     );
   });
 
@@ -407,75 +224,3 @@ describe('SandboxBridge execution flow', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Full round-trip simulation
-// ---------------------------------------------------------------------------
-
-describe('Full execution round-trip', () => {
-  it('simulates complete script execution with state persistence', async () => {
-    const rpcLog: string[] = [];
-    const hostCall: HostCallFn = async (method, args) => {
-      rpcLog.push(method);
-      if (method === 'locator_action') {
-        const a = args as any;
-        if (a.actionMethod === 'textContent') return '$99.99';
-      }
-      return undefined;
-    };
-
-    const source = `
-      async function run(page, context) {
-        await page.goto(context.url);
-        await page.waitForLoadState('domcontentloaded');
-        const price = await page.locator('.price-display').textContent();
-        const prev = context.state.lastPrice;
-        if (prev && price !== prev) {
-          await context.notify('Price changed: ' + prev + ' -> ' + price);
-        }
-        context.state.lastPrice = price;
-        return { price };
-      }
-    `;
-
-    // First run
-    const result1 = await executeScript(source, 'task-1', hostCall, {}, 'https://example.com');
-    expect(result1.ok).toBe(true);
-    if (result1.ok) {
-      expect(result1.result).toEqual({ price: '$99.99' });
-      expect(result1.state.lastPrice).toBe('$99.99');
-      // No notify on first run (no prev price)
-      expect(rpcLog).not.toContain('notify');
-    }
-
-    // Second run with previous state
-    rpcLog.length = 0;
-    const result2 = await executeScript(
-      source,
-      'task-1',
-      hostCall,
-      { lastPrice: '$109.99' },
-      'https://example.com',
-    );
-    expect(result2.ok).toBe(true);
-    if (result2.ok) {
-      expect(result2.result).toEqual({ price: '$99.99' });
-      // Notify should be called because price changed
-      expect(rpcLog).toContain('notify');
-    }
-  });
-
-  it('properly records execution duration', async () => {
-    const hostCall: HostCallFn = async () => undefined;
-
-    const source = `
-      async function run(page, context) {
-        return { done: true };
-      }
-    `;
-
-    const result = await executeScript(source, 'task-1', hostCall, {});
-    expect(result.ok).toBe(true);
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
-    expect(result.durationMs).toBeLessThan(5000);
-  });
-});

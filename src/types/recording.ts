@@ -7,9 +7,8 @@ export interface A11yNode {
   [key: string]: unknown;
 }
 
-export interface RawRecordingAction {
-  action: 'click' | 'type' | 'navigate';
-  timestamp: number;
+// Shared fields between RawRecordingAction and RecordingStep
+interface RecordingActionBase {
   selector?: string;
   elementTag?: string;
   elementText?: string;
@@ -23,23 +22,17 @@ export interface RawRecordingAction {
   clickPositionHint?: { x: number; y: number };
 }
 
-export interface RecordingStep {
+export interface RawRecordingAction extends RecordingActionBase {
+  action: 'click' | 'type' | 'navigate';
+  timestamp: number;
+}
+
+export interface RecordingStep extends RecordingActionBase {
   id: string;
   recordingId: string;
   sequenceIndex: number;
   status: 'raw' | 'enriched' | 'described';
   action: 'click' | 'type' | 'navigate' | 'narration';
-  selector?: string;
-  elementTag?: string;
-  elementText?: string;
-  elementAttributes?: Record<string, string>;
-  elementRole?: string;
-  a11ySubtree?: A11yNode;
-  typedText?: string;
-  url?: string;
-  pageTitle?: string;
-  viewportDimensions?: { width: number; height: number };
-  clickPositionHint?: { x: number; y: number };
   screenshot?: string;
   speechTranscript?: string;
   description?: string;

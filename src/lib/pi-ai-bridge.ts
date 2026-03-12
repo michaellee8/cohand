@@ -2,7 +2,7 @@ import { getModel } from '@mariozechner/pi-ai';
 import type { AssistantMessage } from '@mariozechner/pi-ai';
 import type { Settings } from '../types';
 import type { LlmUsageRecord } from '../types/notification';
-import { CODEX_CLIENT_ID, CODEX_TOKEN_URL } from '../constants';
+import { DEFAULT_LLM_MODEL, CODEX_CLIENT_ID, CODEX_TOKEN_URL } from '../constants';
 import {
   getEncryptedTokens,
   getEncryptionKeyEncoded,
@@ -101,7 +101,7 @@ export function resolveModel(
       return getModelSafe(
         'openai-codex',
         'openai-codex-responses',
-        overrideModel ?? 'gpt-5.4',
+        overrideModel ?? DEFAULT_LLM_MODEL,
       );
 
     case 'anthropic':

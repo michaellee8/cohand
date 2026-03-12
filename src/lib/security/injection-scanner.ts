@@ -138,22 +138,3 @@ export function scanNotification(message: string): ScanResult {
   }
 }
 
-/**
- * Classify content flags for reporting.
- * Returns human-readable descriptions.
- */
-export function classifyFlags(flags: string[]): string[] {
-  return flags.map((flag) => {
-    if (flag === 'prompt_injection')
-      return 'Possible prompt injection detected';
-    if (flag === 'state_too_large')
-      return `State exceeds ${MAX_STATE_SIZE} byte limit`;
-    if (flag === 'scan_error')
-      return 'Scanner error (content blocked as precaution)';
-    if (flag.startsWith('sensitive:')) {
-      const type = flag.replace('sensitive:', '');
-      return `Contains ${type.replace('_', ' ')} pattern`;
-    }
-    return flag;
-  });
-}

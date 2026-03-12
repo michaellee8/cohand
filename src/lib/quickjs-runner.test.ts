@@ -295,7 +295,7 @@ describe('quickjs-runner', () => {
       mockRpcCallback,
     );
 
-    const evalCall = mockContext.evalCodeAsync.mock.calls[0][0] as string;
+    const evalCall = (mockContext.evalCodeAsync.mock.calls as any[])[0][0] as string;
     // The wrapper should contain the page method definitions
     expect(evalCall).toContain('goto');
     expect(evalCall).toContain('click');
@@ -315,7 +315,7 @@ describe('quickjs-runner', () => {
       mockRpcCallback,
     );
 
-    const evalCall = mockContext.evalCodeAsync.mock.calls[0][0] as string;
+    const evalCall = (mockContext.evalCodeAsync.mock.calls as any[])[0][0] as string;
     expect(evalCall).toContain('textContent');
     expect(evalCall).toContain('getAttribute');
     expect(evalCall).toContain('boundingBox');

@@ -145,8 +145,17 @@ function walkElement(element: Element, depth: number = 0): A11yNode | null {
   // Skip hidden elements
   if (element instanceof HTMLElement) {
     if (element.hidden || element.getAttribute('aria-hidden') === 'true') return null;
-    const style = window.getComputedStyle(element);
-    if (style.display === 'none' || style.visibility === 'hidden') return null;
+    // Fast-path: offsetParent is null for display:none (skip expensive getComputedStyle)
+    // Does not apply to body/html or fixed/sticky elements
+    if (element.offsetParent === null && element !== document.body && element !== document.documentElement) {
+      const style = window.getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden') return null;
+      // If position is not fixed/sticky and has no offsetParent, skip (likely not visible)
+      if (style.position !== 'fixed' && style.position !== 'sticky' && style.display !== 'contents') return null;
+    } else {
+      const style = window.getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden') return null;
+    }
   }
 
   // Skip script, style, noscript
@@ -193,6 +202,9 @@ function walkElement(element: Element, depth: number = 0): A11yNode | null {
 }
 
 export function generateAccessibilityTree(): A11yNode | null {
+  // Clear stale refs from previous tree generation
+  refMap.clear();
+  nextRefId = 0;
   return walkElement(document.body);
 }
 

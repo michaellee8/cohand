@@ -1,5 +1,5 @@
 import { validateToken } from './remote-auth';
-import { executeRemoteCommand, releaseTab, type RemoteCommand, type RemoteResult } from './remote-relay';
+import { executeRemoteCommand, releaseTab, releaseTabsForSession, type RemoteCommand, type RemoteResult } from './remote-relay';
 import { CDPManager } from '../cdp';
 import { getDomainPermissions } from '../storage';
 
@@ -8,6 +8,19 @@ interface RemoteSession {
   allowedDomains: string[];
   authenticatedAt: number;
 }
+
+/** Session idle timeout: 30 minutes */
+const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+
+/** Rate limiting: max 5 failed auth attempts per minute */
+const AUTH_RATE_LIMIT_MAX = 5;
+const AUTH_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+
+interface AuthAttemptRecord {
+  timestamps: number[];
+}
+
+const authAttempts = new Map<string, AuthAttemptRecord>();
 
 const activeSessions = new Map<string, RemoteSession>();
 
@@ -19,10 +32,43 @@ export function getActiveSessionCount(): number {
 }
 
 /**
- * Clear all active sessions. Used for testing.
+ * Clear all active sessions. Used for testing and token regeneration.
  */
 export function clearActiveSessions(): void {
   activeSessions.clear();
+}
+
+/**
+ * Reset auth rate limit state. Used for testing.
+ */
+export function resetAuthRateLimits(): void {
+  authAttempts.clear();
+}
+
+/**
+ * Check if an extension is rate limited for auth attempts.
+ */
+function isAuthRateLimited(extensionId: string): boolean {
+  const record = authAttempts.get(extensionId);
+  if (!record) return false;
+  const now = Date.now();
+  // Filter to only recent attempts within the window
+  record.timestamps = record.timestamps.filter(t => now - t < AUTH_RATE_LIMIT_WINDOW_MS);
+  return record.timestamps.length >= AUTH_RATE_LIMIT_MAX;
+}
+
+/**
+ * Record a failed auth attempt for rate limiting.
+ */
+function recordFailedAuth(extensionId: string): void {
+  const record = authAttempts.get(extensionId);
+  const now = Date.now();
+  if (record) {
+    record.timestamps = record.timestamps.filter(t => now - t < AUTH_RATE_LIMIT_WINDOW_MS);
+    record.timestamps.push(now);
+  } else {
+    authAttempts.set(extensionId, { timestamps: [now] });
+  }
 }
 
 /**
@@ -47,8 +93,14 @@ export function createRemoteHandler(
     (async () => {
       // Auth handshake
       if (message.type === 'remote:auth') {
+        // Rate limiting check
+        if (isAuthRateLimited(extensionId)) {
+          return { ok: false, error: 'Rate limited' };
+        }
+
         const valid = await validateToken(message.token);
         if (!valid) {
+          recordFailedAuth(extensionId);
           return { ok: false, error: 'Invalid token' };
         }
         // Intersect client-requested domains with user's configured permissions
@@ -73,6 +125,13 @@ export function createRemoteHandler(
         return { ok: false, error: 'Not authenticated' };
       }
 
+      // Session idle timeout check
+      if (Date.now() - session.authenticatedAt > SESSION_IDLE_TIMEOUT_MS) {
+        activeSessions.delete(extensionId);
+        releaseTabsForSession(extensionId);
+        return { ok: false, error: 'Session expired' };
+      }
+
       // CDP command
       if (message.type === 'remote:command') {
         const command: RemoteCommand = {
@@ -81,7 +140,12 @@ export function createRemoteHandler(
           params: message.params,
           tabId: message.tabId,
         };
-        return await executeRemoteCommand(cdp, command, session.allowedDomains, getTabUrl, extensionId);
+        const result = await executeRemoteCommand(cdp, command, session.allowedDomains, getTabUrl, extensionId);
+        // Update authenticatedAt on successful command (idle timeout, not absolute)
+        if (result.ok) {
+          session.authenticatedAt = Date.now();
+        }
+        return result;
       }
 
       // Release tab — pass extensionId so only the owning session can release
@@ -90,8 +154,9 @@ export function createRemoteHandler(
         return { ok: true };
       }
 
-      // Disconnect
+      // Disconnect — release all tabs for this session before deleting
       if (message.type === 'remote:disconnect') {
+        releaseTabsForSession(extensionId);
         activeSessions.delete(extensionId);
         return { ok: true };
       }

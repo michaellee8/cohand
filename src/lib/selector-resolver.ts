@@ -8,6 +8,32 @@ export interface ResolvedElement {
   bounds: { x: number; y: number; width: number; height: number };
 }
 
+/** Typed interfaces for CDP responses used by the selector resolver. */
+
+interface CDPDocumentResponse {
+  root: { nodeId: number };
+}
+
+interface CDPQuerySelectorResponse {
+  nodeId: number;
+}
+
+interface CDPContentQuadsResponse {
+  quads: number[][];
+}
+
+interface CDPResolveNodeResponse {
+  object: { objectId: string };
+}
+
+interface CDPRequestNodeResponse {
+  nodeId: number;
+}
+
+interface CDPQueryAXTreeResponse {
+  nodes: Array<{ backendDOMNodeId: number }>;
+}
+
 /**
  * Resolve a CSS selector to an element's position using CDP DOM methods.
  * DOM-first pipeline: avoids expensive full AX tree queries.
@@ -28,14 +54,14 @@ export async function resolveSelector(
   const doc = (await cdp.send(tabId, 'DOM.getDocument', {
     depth: 0,
     pierce: true,
-  })) as any;
+  })) as CDPDocumentResponse;
   const rootNodeId = doc.root.nodeId;
 
   // Query selector
   const result = (await cdp.send(tabId, 'DOM.querySelector', {
     nodeId: rootNodeId,
     selector,
-  })) as any;
+  })) as CDPQuerySelectorResponse;
 
   if (!result.nodeId || result.nodeId === 0) {
     throw new SelectorNotFoundError(`Selector not found: ${selector}`);
@@ -49,7 +75,7 @@ export async function resolveSelector(
   // Get element bounds
   const quads = (await cdp.send(tabId, 'DOM.getContentQuads', {
     nodeId,
-  })) as any;
+  })) as CDPContentQuadsResponse;
 
   if (!quads.quads || quads.quads.length === 0) {
     throw new SelectorNotFoundError(
@@ -74,14 +100,14 @@ export async function resolveA11ySelector(
   const doc = (await cdp.send(tabId, 'DOM.getDocument', {
     depth: 0,
     pierce: true,
-  })) as any;
+  })) as CDPDocumentResponse;
 
   // Use Accessibility.queryAXTree for role/name matching
   const axResult = (await cdp.send(tabId, 'Accessibility.queryAXTree', {
     nodeId: doc.root.nodeId,
     role,
     name,
-  })) as any;
+  })) as CDPQueryAXTreeResponse;
 
   if (!axResult.nodes || axResult.nodes.length === 0) {
     const desc =
@@ -100,11 +126,11 @@ export async function resolveA11ySelector(
   // Resolve backendNodeId to a remote object, then request a DOM nodeId
   const resolved = (await cdp.send(tabId, 'DOM.resolveNode', {
     backendNodeId,
-  })) as any;
+  })) as CDPResolveNodeResponse;
 
   const requested = (await cdp.send(tabId, 'DOM.requestNode', {
     objectId: resolved.object.objectId,
-  })) as any;
+  })) as CDPRequestNodeResponse;
 
   const nodeId = requested.nodeId;
 
@@ -114,7 +140,7 @@ export async function resolveA11ySelector(
   // Get element bounds
   const quads = (await cdp.send(tabId, 'DOM.getContentQuads', {
     nodeId,
-  })) as any;
+  })) as CDPContentQuadsResponse;
 
   if (!quads.quads || quads.quads.length === 0) {
     throw new SelectorNotFoundError('A11y element has no visual bounds');

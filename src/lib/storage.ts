@@ -1,8 +1,9 @@
 import type { Settings, DomainPermission, EncryptedTokens, EncryptedCodexOAuth } from '../types';
+import { DEFAULT_LLM_MODEL } from '../constants';
 
 export const DEFAULT_SETTINGS: Settings = {
   llmProvider: 'chatgpt-subscription',
-  llmModel: 'gpt-5.4',
+  llmModel: DEFAULT_LLM_MODEL,
   yoloMode: false,
   language: 'en',
 };

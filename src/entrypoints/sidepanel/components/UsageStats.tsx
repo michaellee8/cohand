@@ -3,14 +3,16 @@ import type { UsageSummary } from '../../../lib/llm-usage';
 
 export function UsageStats() {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     // Fetch via service worker message
     chrome.runtime.sendMessage({ type: 'GET_USAGE_SUMMARY', sinceDaysAgo: 30 })
       .then(response => setSummary(response.summary))
-      .catch(() => {});
+      .catch(() => setError(true));
   }, []);
 
+  if (error) return <p className="text-xs text-red-500">Failed to load usage data</p>;
   if (!summary) return <p className="text-xs text-gray-400">Loading usage...</p>;
 
   return (

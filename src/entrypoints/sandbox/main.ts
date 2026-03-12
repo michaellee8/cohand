@@ -1,12 +1,14 @@
 // Sandbox-side: executes scripts in QuickJS WASM isolation.
 // Scripts have NO access to browser globals — only the page proxy and context.
 import { createQuickJSExecutor } from '../../lib/quickjs-runner';
+import { QUICKJS_TIMEOUT_MS } from '../../constants';
 
 console.log('[Cohand] Sandbox loaded (QuickJS WASM)');
 
 // Extension origin for targeted postMessage
 const PARENT_ORIGIN = (() => {
-  try { return new URL(chrome.runtime.getURL('')).origin; } catch { return '*'; }
+  try { return new URL(chrome.runtime.getURL('')).origin; }
+  catch { throw new Error('Cannot determine parent origin'); }
 })();
 
 // Pending RPC callbacks — used by quickjs-runner's rpcCallback to send RPCs to parent
@@ -23,6 +25,9 @@ function sendRPC(taskId: string, method: string, args: Record<string, unknown>):
 
 // Listen for messages from parent (offscreen doc)
 window.addEventListener('message', async (event) => {
+  // Validate origin — only accept messages from our parent (offscreen doc)
+  if (event.origin !== PARENT_ORIGIN) return;
+
   const data = event.data;
 
   if (data.type === 'rpc-result') {
@@ -39,13 +44,19 @@ window.addEventListener('message', async (event) => {
     const { executionId, taskId, source, state } = data;
 
     try {
-      const result = await createQuickJSExecutor(
-        source,
-        taskId,
-        state || {},
-        // RPC callback: forward to parent via postMessage
-        (tid, method, args) => sendRPC(tid, method, args),
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Script execution timed out')), QUICKJS_TIMEOUT_MS)
       );
+      const result = await Promise.race([
+        createQuickJSExecutor(
+          source,
+          taskId,
+          state || {},
+          // RPC callback: forward to parent via postMessage
+          (tid, method, args) => sendRPC(tid, method, args),
+        ),
+        timeoutPromise,
+      ]);
 
       window.parent.postMessage({
         type: 'execute-script-result',

@@ -5,6 +5,15 @@ import { SandboxBridge } from './sandbox-bridge';
 import { RPCClient } from './rpc-client';
 import type { ExecuteScriptResult } from './sandbox-bridge';
 
+// Mock chrome.runtime.getURL so getTargetOrigin() returns a real origin.
+// We use https:// because Node's URL parser returns "null" for chrome-extension:// origins.
+const FAKE_EXTENSION_ORIGIN = 'https://fake-extension-id.chromiumapp.org';
+vi.stubGlobal('chrome', {
+  runtime: {
+    getURL: vi.fn((path: string) => `${FAKE_EXTENSION_ORIGIN}/${path}`),
+  },
+});
+
 // Mock iframe with a fake contentWindow
 function createMockIframe(): {
   iframe: HTMLIFrameElement;
@@ -95,7 +104,7 @@ describe('SandboxBridge', () => {
           ok: true,
           value: { found: true },
         },
-        '*',
+        FAKE_EXTENSION_ORIGIN,
       );
     });
   });
@@ -128,7 +137,7 @@ describe('SandboxBridge', () => {
           ok: false,
           error: { type: 'SelectorNotFound', message: 'Element not found' },
         },
-        '*',
+        FAKE_EXTENSION_ORIGIN,
       );
     });
   });
@@ -154,7 +163,7 @@ describe('SandboxBridge', () => {
         state: { step: 1 },
         tabId: 123,
       },
-      '*',
+      FAKE_EXTENSION_ORIGIN,
     );
   });
 
@@ -228,7 +237,7 @@ describe('SandboxBridge', () => {
           ok: false,
           error: { type: 'Unknown', message: 'generic failure' },
         },
-        '*',
+        FAKE_EXTENSION_ORIGIN,
       );
     });
   });
@@ -262,8 +271,7 @@ describe('SandboxBridge', () => {
       tabId: 1,
     });
 
-    // In test env, getTargetOrigin falls back to '*' since chrome.runtime isn't available
-    // But verify postMessage IS called with the second argument
+    // Verify postMessage IS called with the extension origin as the second argument
     const call = mockIframe.contentWindow.postMessage.mock.calls[0];
     expect(call.length).toBe(2);
     expect(call[1]).toBeDefined();

@@ -15,7 +15,6 @@ export type Message =
   // Script runs
   | { type: 'GET_RUNS'; taskId: string; limit?: number }
   // Script generation (wizard)
-  | { type: 'GENERATE_SCRIPT'; tabId: number; description: string; domains: string[] }
   | { type: 'TEST_SCRIPT'; tabId: number; source: string; domains: string[] }
   // Page observation
   | { type: 'GET_A11Y_TREE'; tabId: number }
@@ -53,10 +52,9 @@ export type MessageResponse = {
   EXECUTE_TASK: { ok: true };
   CANCEL_EXECUTION: { ok: true };
   GET_RUNS: { runs: ScriptRun[] };
-  GENERATE_SCRIPT: { source: string; astValid: boolean; securityPassed: boolean };
   TEST_SCRIPT: { ok: boolean; result?: unknown; error?: string };
   GET_A11Y_TREE: { tree: unknown };
-  SCREENSHOT: { dataUrl: string };
+  SCREENSHOT: { dataUrl: string | null; error?: string };
   ATTACH_DEBUGGER: { ok: true };
   DETACH_DEBUGGER: { ok: true };
   GET_NOTIFICATIONS: { notifications: TaskNotification[] };

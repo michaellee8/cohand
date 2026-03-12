@@ -4,7 +4,6 @@ import {
   putTask,
   getTask,
   getAllTasks,
-  deleteTask as dbDeleteTask,
   putScriptVersion,
   getScriptVersionsForTask,
   capScriptVersions,
@@ -66,7 +65,9 @@ import type { ScriptVersion, ScriptRun, RecordingStep } from '../types';
 
 export default defineBackground(() => {
   console.log('[Cohand] Service worker started');
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(err =>
+    console.error('[Cohand] Failed to set panel behavior:', err),
+  );
 
   // ---------------------------------------------------------------------------
   // Shared state
@@ -77,6 +78,24 @@ export default defineBackground(() => {
 
   // Track which tab is executing which task (taskId -> tabId)
   const taskTabMap = new Map<string, number>();
+
+  // Write-through persistence for taskTabMap
+  async function persistTaskTabMap(): Promise<void> {
+    const obj = Object.fromEntries(taskTabMap);
+    await chrome.storage.session.set({ taskTabMap: obj });
+  }
+
+  async function restoreTaskTabMap(): Promise<void> {
+    try {
+      const result = await chrome.storage.session.get('taskTabMap');
+      if (result.taskTabMap && typeof result.taskTabMap === 'object') {
+        for (const [k, v] of Object.entries(result.taskTabMap)) {
+          if (typeof v === 'number') taskTabMap.set(k, v);
+        }
+      }
+    } catch {}
+  }
+
   // Track in-flight execution abort controllers
   const executionAbortControllers = new Map<string, AbortController>();
   // Override domains for test executions (temp taskId -> domains)
@@ -96,21 +115,31 @@ export default defineBackground(() => {
     return tab.url || '';
   }
 
+  let offscreenMutex: Promise<void> | null = null;
+
   async function ensureOffscreen(): Promise<void> {
-    try {
-      const existingContexts = await chrome.runtime.getContexts({
-        contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
-      });
-      if (existingContexts.length === 0) {
-        await chrome.offscreen.createDocument({
-          url: 'offscreen.html',
-          reasons: [chrome.offscreen.Reason.WORKERS],
-          justification: 'QuickJS WASM sandbox for script execution',
-        });
-      }
-    } catch (err) {
-      console.error('[Cohand] Failed to create offscreen document:', err);
+    if (offscreenMutex) {
+      await offscreenMutex;
+      return;
     }
+    offscreenMutex = (async () => {
+      try {
+        const existingContexts = await chrome.runtime.getContexts({
+          contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+        });
+        if (existingContexts.length === 0) {
+          await chrome.offscreen.createDocument({
+            url: 'offscreen.html',
+            reasons: [chrome.offscreen.Reason.WORKERS],
+            justification: 'QuickJS WASM sandbox for script execution',
+          });
+        }
+      } catch (err) {
+        console.error('[Cohand] Failed to create offscreen document:', err);
+      }
+    })();
+    await offscreenMutex;
+    offscreenMutex = null;
   }
 
   // ---------------------------------------------------------------------------
@@ -123,6 +152,9 @@ export default defineBackground(() => {
 
       // Open IndexedDB
       db = await openDB();
+
+      // Restore taskTabMap from session storage (survives SW restarts)
+      await restoreTaskTabMap();
 
       // Set up CDP listeners (navigation detection)
       cdp.setupListeners();
@@ -179,6 +211,7 @@ export default defineBackground(() => {
       console.log('[Cohand] Service worker initialized');
     } catch (err) {
       console.error('[Cohand] Init error:', err);
+      throw err; // Rethrow so gate promise rejects and router refuses messages
     }
   }
 
@@ -226,7 +259,41 @@ export default defineBackground(() => {
   });
 
   router.on('DELETE_TASK', async (msg) => {
-    await dbDeleteTask(db, msg.taskId);
+    // Cascade delete related records in a single transaction
+    const tx = db.transaction(
+      ['tasks', 'script_versions', 'script_runs', 'task_state', 'state_snapshots', 'notifications', 'llm_usage'],
+      'readwrite',
+    );
+
+    // Delete task itself
+    tx.objectStore('tasks').delete(msg.taskId);
+
+    // Delete related records via index cursor
+    const deleteByCursor = (storeName: string, indexName: string, range: IDBKeyRange | IDBValidKey) => {
+      const store = tx.objectStore(storeName);
+      const index = store.index(indexName);
+      const request = index.openCursor(range);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor) { cursor.delete(); cursor.continue(); }
+      };
+    };
+
+    // Simple-key indexes use IDBKeyRange.only; compound-key indexes use bound range
+    deleteByCursor('script_versions', 'by_task', IDBKeyRange.only(msg.taskId));
+    deleteByCursor('script_runs', 'by_task_time', IDBKeyRange.bound([msg.taskId], [msg.taskId, '\uffff']));
+    deleteByCursor('state_snapshots', 'by_task', IDBKeyRange.only(msg.taskId));
+    deleteByCursor('notifications', 'by_task_time', IDBKeyRange.bound([msg.taskId], [msg.taskId, '\uffff']));
+    deleteByCursor('llm_usage', 'by_task', IDBKeyRange.bound([msg.taskId], [msg.taskId, '\uffff']));
+
+    // Delete task state (keyed by taskId directly)
+    tx.objectStore('task_state').delete(msg.taskId);
+
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+
     await unscheduleTask(msg.taskId);
     // Cancel any in-flight execution
     executionAbortControllers.get(msg.taskId)?.abort();
@@ -270,6 +337,7 @@ export default defineBackground(() => {
       releaseTab,
       cdp,
       ensureOffscreen,
+      onTaskTabMapChange: () => persistTaskTabMap().catch(() => {}),
     }).catch(err =>
       console.error(`[Cohand] Execution error for task ${taskId}:`, err),
     );
@@ -284,39 +352,6 @@ export default defineBackground(() => {
       executionAbortControllers.delete(msg.taskId);
     }
     return { ok: true as const };
-  });
-
-  // ---------------------------------------------------------------------------
-  // Script generation (wizard flow)
-  // ---------------------------------------------------------------------------
-
-  router.on('GENERATE_SCRIPT', async (msg) => {
-    // Return page observation data. Per the design doc, the side panel
-    // makes all LLM calls — the wizard store handles script generation,
-    // AST validation, and security review directly.
-    const treeResponse = await chrome.tabs.sendMessage(msg.tabId, {
-      type: 'GET_A11Y_TREE',
-    });
-
-    const tab = await chrome.tabs.get(msg.tabId);
-    let screenshot: string | undefined;
-    try {
-      screenshot = await chrome.tabs.captureVisibleTab(tab.windowId!, { format: 'png' });
-    } catch {
-      // May fail on restricted pages
-    }
-
-    return {
-      source: '',
-      astValid: false,
-      securityPassed: false,
-      observation: {
-        a11yTree: JSON.stringify(treeResponse?.tree ?? treeResponse, null, 2),
-        screenshot,
-        url: tab.url || '',
-        title: tab.title || '',
-      },
-    } as any;
   });
 
   router.on('TEST_SCRIPT', async (msg) => {
@@ -336,6 +371,7 @@ export default defineBackground(() => {
 
       const tempTaskId = `test-${Date.now()}`;
       taskTabMap.set(tempTaskId, tabId);
+      persistTaskTabMap().catch(() => {});
       resetCumulativeReads(tempTaskId);
       testDomainOverrides.set(tempTaskId, domains ?? []);
 

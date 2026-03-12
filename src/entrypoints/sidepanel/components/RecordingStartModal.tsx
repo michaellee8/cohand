@@ -11,6 +11,7 @@ export function RecordingStartModal({ onClose }: Props) {
   const { startRecording } = useRecordingStore();
   const [micState, setMicState] = useState<PermissionState>('prompt');
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     checkMicPermission().then(setMicState).catch(() => {});
@@ -18,6 +19,7 @@ export function RecordingStartModal({ onClose }: Props) {
 
   const handleStart = async () => {
     setStarting(true);
+    setError(null);
     try {
       // Find the active non-extension tab to record.
       // Filter out chrome-extension:// pages (e.g. side panel opened as tab in tests).
@@ -26,8 +28,9 @@ export function RecordingStartModal({ onClose }: Props) {
       if (!tab?.id) throw new Error('No active tab');
       await startRecording(tab.id);
       onClose();
-    } catch {
+    } catch (err: unknown) {
       setStarting(false);
+      setError(err instanceof Error ? err.message : 'Failed to start recording');
     }
   };
 
@@ -55,6 +58,12 @@ export function RecordingStartModal({ onClose }: Props) {
           <button onClick={handleRequestMic} className="w-full text-sm text-blue-600 hover:text-blue-800 mb-3">
             Enable microphone for voice narration
           </button>
+        )}
+
+        {error && (
+          <div className="text-xs text-red-600 bg-red-50 rounded-lg p-2 mb-3">
+            {error}
+          </div>
         )}
 
         <div className="flex gap-2">

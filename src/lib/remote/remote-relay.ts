@@ -22,6 +22,7 @@ export interface RemoteResult {
 export interface TabOwnershipRecord {
   owner: 'local' | 'remote';
   sessionId?: string;
+  taskId?: string;
 }
 
 /**
@@ -30,14 +31,18 @@ export interface TabOwnershipRecord {
  */
 const tabOwnership = new Map<number, TabOwnershipRecord>();
 
-export function claimTab(tabId: number, mode: 'local' | 'remote', sessionId?: string): boolean {
+export function claimTab(tabId: number, mode: 'local' | 'remote', sessionId?: string, taskId?: string): boolean {
   const current = tabOwnership.get(tabId);
   if (current && current.owner !== mode) return false;
   // For remote mode, if already claimed by a different session, reject
   if (current && mode === 'remote' && current.sessionId && sessionId && current.sessionId !== sessionId) {
     return false;
   }
-  tabOwnership.set(tabId, { owner: mode, sessionId });
+  const record: TabOwnershipRecord = { owner: mode, sessionId };
+  if (mode === 'local' && taskId) {
+    record.taskId = taskId;
+  }
+  tabOwnership.set(tabId, record);
   return true;
 }
 
@@ -56,6 +61,18 @@ export function getTabOwner(tabId: number): TabOwnershipRecord | null {
 }
 
 /**
+ * Release all tabs owned by a specific session.
+ * Called when a remote session disconnects.
+ */
+export function releaseTabsForSession(sessionId: string): void {
+  for (const [tabId, record] of tabOwnership) {
+    if (record.sessionId === sessionId) {
+      tabOwnership.delete(tabId);
+    }
+  }
+}
+
+/**
  * Reset all tab ownership state. Used for testing.
  */
 export function resetTabOwnership(): void {
@@ -66,7 +83,7 @@ export function resetTabOwnership(): void {
  * Sensitive URL scheme check for remote relay.
  * Blocks CDP operations on browser-internal and local file URLs.
  */
-const SENSITIVE_SCHEMES = ['chrome:', 'chrome-extension:', 'about:', 'file:', 'devtools:'];
+const SENSITIVE_SCHEMES = ['chrome:', 'chrome-extension:', 'about:', 'file:', 'devtools:', 'javascript:', 'data:'];
 
 export function isSensitiveScheme(url: string): boolean {
   try {
@@ -133,16 +150,7 @@ export async function executeRemoteCommand(
       };
     }
 
-    // Claim for remote if not already
-    if (!claimTab(command.tabId, 'remote', sessionId)) {
-      return {
-        id: command.id,
-        ok: false,
-        error: 'Failed to claim tab for remote control',
-      };
-    }
-
-    // Domain validation
+    // Domain validation (before claiming tab)
     const tabUrl = await getTabUrl(command.tabId);
 
     // Sensitive scheme check — block CDP on browser-internal and local file pages
@@ -163,9 +171,7 @@ export async function executeRemoteCommand(
     }
 
     // CDP method whitelist — only allow safe methods, reject everything else
-    if (!ALLOWED_CDP_METHODS.has(command.method) &&
-        !command.method.startsWith('Input.dispatchMouseEvent') &&
-        !command.method.startsWith('Input.dispatchTouchEvent')) {
+    if (!ALLOWED_CDP_METHODS.has(command.method)) {
       return {
         id: command.id,
         ok: false,
@@ -199,6 +205,15 @@ export async function executeRemoteCommand(
       }
     }
 
+    // Claim for remote AFTER all validation checks pass
+    if (!claimTab(command.tabId, 'remote', sessionId)) {
+      return {
+        id: command.id,
+        ok: false,
+        error: 'Failed to claim tab for remote control',
+      };
+    }
+
     // Ensure debugger attached
     if (!cdp.isAttached(command.tabId)) {
       await cdp.attach(command.tabId);
@@ -209,6 +224,8 @@ export async function executeRemoteCommand(
 
     return { id: command.id, ok: true, result };
   } catch (err: any) {
+    // Release tab if it was claimed but execution failed
+    releaseTab(command.tabId, sessionId);
     return { id: command.id, ok: false, error: err.message };
   }
 }

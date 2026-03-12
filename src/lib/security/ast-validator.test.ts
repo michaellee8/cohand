@@ -178,6 +178,42 @@ describe('validateAST', () => {
       expect(result.errors.some(e => e.includes('constructor'))).toBe(true);
     });
 
+    it('blocks .getPrototypeOf access', () => {
+      const result = validateAST(`Object.getPrototypeOf(obj)`);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('getPrototypeOf'))).toBe(true);
+    });
+
+    it('blocks .getOwnPropertyDescriptor access', () => {
+      const result = validateAST(`Object.getOwnPropertyDescriptor(obj, 'key')`);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('getOwnPropertyDescriptor'))).toBe(true);
+    });
+
+    it('blocks .defineProperty access', () => {
+      const result = validateAST(`Object.defineProperty(obj, 'key', {})`);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('defineProperty'))).toBe(true);
+    });
+
+    it('blocks .setPrototypeOf access', () => {
+      const result = validateAST(`Object.setPrototypeOf(obj, proto)`);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('setPrototypeOf'))).toBe(true);
+    });
+
+    it('blocks .getOwnPropertyNames access', () => {
+      const result = validateAST(`Object.getOwnPropertyNames(obj)`);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('getOwnPropertyNames'))).toBe(true);
+    });
+
+    it('blocks .getOwnPropertySymbols access', () => {
+      const result = validateAST(`Object.getOwnPropertySymbols(obj)`);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('getOwnPropertySymbols'))).toBe(true);
+    });
+
     it('allows safe computed access with number literals', () => {
       const result = validateAST(`const arr = [1,2,3]; arr[0]`);
       expect(result.valid).toBe(true);

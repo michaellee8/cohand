@@ -783,7 +783,7 @@ describe('Wizard with Mocked LLM (injected store state)', () => {
           const errorText = await errorMsg.evaluate((el) => el.textContent);
           // Expected: "No API key configured" error
           assert.ok(
-            errorText.includes('API key') || errorText.includes('error') || errorText.includes('Error'),
+            errorText.includes('API key') || errorText.includes('error') || errorText.includes('Error') || errorText.includes('credentials'),
             `Observation step fails without API key (expected). Error: ${errorText}`
           );
           // This confirms the wizard flow reaches the observe step and properly

@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import type { Task, ScriptRun, TaskNotification } from '../../../types';
+import { RUNS_DISPLAY_LIMIT } from '../../../constants';
 
 interface TasksState {
   tasks: Task[];
   selectedTaskId: string | null;
-  runs: Map<string, ScriptRun[]>;
+  runs: Record<string, ScriptRun[]>;
   notifications: TaskNotification[];
   unreadCount: number;
   loading: boolean;
@@ -24,7 +25,7 @@ interface TasksState {
 export const useTasksStore = create<TasksState>((set, get) => ({
   tasks: [],
   selectedTaskId: null,
-  runs: new Map(),
+  runs: {},
   notifications: [],
   unreadCount: 0,
   loading: false,
@@ -47,10 +48,10 @@ export const useTasksStore = create<TasksState>((set, get) => ({
 
   fetchRunsForTask: async (taskId) => {
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'GET_RUNS', taskId, limit: 20 });
-      const runs = new Map(get().runs);
-      runs.set(taskId, response.runs || []);
-      set({ runs });
+      const response = await chrome.runtime.sendMessage({ type: 'GET_RUNS', taskId, limit: RUNS_DISPLAY_LIMIT });
+      set(state => ({
+        runs: { ...state.runs, [taskId]: response.runs || [] },
+      }));
     } catch (e) { set({ error: String(e) }); }
   },
 
@@ -71,22 +72,27 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   markNotificationRead: async (notificationId) => {
     try {
       await chrome.runtime.sendMessage({ type: 'MARK_NOTIFICATION_READ', notificationId });
-      // Update local state
-      set(state => ({
-        notifications: state.notifications.map(n =>
-          n.id === notificationId ? { ...n, isRead: 1 } : n
-        ),
-        unreadCount: Math.max(0, state.unreadCount - 1),
-      }));
+      set(state => {
+        const notification = state.notifications.find(n => n.id === notificationId);
+        const wasUnread = notification && !notification.isRead;
+        return {
+          notifications: state.notifications.map(n =>
+            n.id === notificationId ? { ...n, isRead: 1 } : n
+          ),
+          unreadCount: wasUnread ? Math.max(0, state.unreadCount - 1) : state.unreadCount,
+        };
+      });
     } catch (e) { set({ error: String(e) }); }
   },
 
   runTask: async (taskId) => {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id) {
-        await chrome.runtime.sendMessage({ type: 'EXECUTE_TASK', taskId, tabId: tab.id });
+      if (!tab?.id) {
+        set({ error: 'No active tab found to run task' });
+        return;
       }
+      await chrome.runtime.sendMessage({ type: 'EXECUTE_TASK', taskId, tabId: tab.id });
     } catch (e) { set({ error: String(e) }); }
   },
 

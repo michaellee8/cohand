@@ -21,20 +21,6 @@ export function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  useEffect(() => {
-    if (!isRecording) return;
-    const port = chrome.runtime.connect({ name: 'recording-stream' });
-    port.onMessage.addListener((msg: any) => {
-      if (msg.type === 'RECORDING_STEP') {
-        useRecordingStore.getState().appendStep(msg.step);
-      }
-      if (msg.type === 'PAGE_SNAPSHOT') {
-        useRecordingStore.getState().addPageSnapshot(msg.snapshotKey, msg.tree);
-      }
-    });
-    return () => port.disconnect();
-  }, [isRecording]);
-
   const handleSubmit = () => {
     if (!input.trim() || isStreaming) return;
     sendMessage(input.trim());

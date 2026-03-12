@@ -41,20 +41,34 @@ export function getTaskIdFromAlarm(alarmName: string): string | null {
 /**
  * Sync all task schedules.
  * Call on startup to ensure alarms match current task state.
+ * Uses diffing to avoid unnecessary alarm recreates.
  */
 export async function syncSchedules(tasks: Task[]): Promise<void> {
-  // Clear all existing task alarms
   const alarms = await chrome.alarms.getAll();
-  for (const alarm of alarms) {
-    if (alarm.name.startsWith(ALARM_PREFIX)) {
-      await chrome.alarms.clear(alarm.name);
+  const existingAlarmNames = new Set(alarms.filter(a => a.name.startsWith(ALARM_PREFIX)).map(a => a.name));
+
+  // Determine desired alarms
+  const desiredAlarms = new Map<string, number>();
+  for (const task of tasks) {
+    if (!task.disabled && task.schedule.type === 'interval') {
+      desiredAlarms.set(`${ALARM_PREFIX}${task.id}`, Math.max(1, task.schedule.intervalMinutes));
     }
   }
 
-  // Re-create alarms for all enabled interval tasks
-  for (const task of tasks) {
-    if (!task.disabled && task.schedule.type === 'interval') {
-      await scheduleTask(task);
+  // Remove alarms that shouldn't exist
+  for (const name of existingAlarmNames) {
+    if (!desiredAlarms.has(name)) {
+      await chrome.alarms.clear(name);
+    }
+  }
+
+  // Create alarms that don't exist yet
+  for (const [name, interval] of desiredAlarms) {
+    if (!existingAlarmNames.has(name)) {
+      await chrome.alarms.create(name, {
+        periodInMinutes: interval,
+        delayInMinutes: interval,
+      });
     }
   }
 }

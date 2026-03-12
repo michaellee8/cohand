@@ -110,7 +110,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       }
 
       const observation: ExplorationResult = {
-        a11yTree: JSON.stringify(treeResponse.tree, null, 2),
+        a11yTree: JSON.stringify(treeResponse?.tree ?? treeResponse ?? {}, null, 2),
         screenshot,
         url: tab.url || '',
         title: tab.title || '',
@@ -137,13 +137,16 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         try {
           const settings = await getSettings();
           const reviewModels = getSecurityReviewModels(settings);
-          const { apiKey: reviewApiKey } = await initLLM();
-          const reviewResult = await securityReview(genResult.source, reviewModels, reviewApiKey);
+          // Reuse apiKey from above instead of calling initLLM() again
+          const reviewResult = await securityReview(genResult.source, reviewModels, apiKey);
           secPassed = reviewResult.approved;
         } catch (err) {
           console.warn('[Cohand] Security review failed, marking as not passed:', err);
         }
       }
+
+      // Guard against stale completion — user may have navigated away
+      if (get().step !== 'observe') return;
 
       set({
         generatedScript: genResult.source,

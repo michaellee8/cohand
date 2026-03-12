@@ -4,7 +4,6 @@ import {
   scanReturnValue,
   scanState,
   scanNotification,
-  classifyFlags,
 } from './injection-scanner';
 import { MAX_STATE_SIZE } from '../../constants';
 
@@ -210,45 +209,3 @@ describe('scanNotification', () => {
   });
 });
 
-describe('classifyFlags', () => {
-  it('formats prompt_injection flag', () => {
-    const classified = classifyFlags(['prompt_injection']);
-    expect(classified).toContain('Possible prompt injection detected');
-  });
-
-  it('formats state_too_large flag', () => {
-    const classified = classifyFlags(['state_too_large']);
-    expect(classified[0]).toContain('byte limit');
-  });
-
-  it('formats scan_error flag', () => {
-    const classified = classifyFlags(['scan_error']);
-    expect(classified).toContain(
-      'Scanner error (content blocked as precaution)',
-    );
-  });
-
-  it('formats sensitive:* flags', () => {
-    const classified = classifyFlags(['sensitive:email', 'sensitive:api_key']);
-    expect(classified).toContain('Contains email pattern');
-    expect(classified).toContain('Contains api key pattern');
-  });
-
-  it('passes through unknown flags unchanged', () => {
-    const classified = classifyFlags(['unknown_flag']);
-    expect(classified).toContain('unknown_flag');
-  });
-
-  it('formats all flags for display', () => {
-    const classified = classifyFlags([
-      'prompt_injection',
-      'sensitive:email',
-      'scan_error',
-    ]);
-    expect(classified).toContain('Possible prompt injection detected');
-    expect(classified).toContain('Contains email pattern');
-    expect(classified).toContain(
-      'Scanner error (content blocked as precaution)',
-    );
-  });
-});

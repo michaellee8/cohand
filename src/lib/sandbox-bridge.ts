@@ -107,7 +107,7 @@ export class SandboxBridge {
     try {
       return new URL(chrome.runtime.getURL('')).origin;
     } catch {
-      return '*'; // fallback for test environment
+      throw new Error('Cannot determine extension origin for postMessage');
     }
   }
 

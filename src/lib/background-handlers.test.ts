@@ -115,7 +115,7 @@ function setupChromeMock() {
 let db: IDBDatabase;
 let router: MessageRouter;
 let lastRecordingStep: RecordingStep | null = null;
-let recordingPortMock: { postMessage: ReturnType<typeof vi.fn> } | null = null;
+let recordingPortMock: { postMessage: ReturnType<typeof vi.fn<(...args: any[]) => any>> } | null = null;
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -339,12 +339,7 @@ beforeEach(async () => {
     return { ok: true as const };
   });
 
-  // GENERATE_SCRIPT / TEST_SCRIPT — stubs
-  router.on('GENERATE_SCRIPT', async () => ({
-    source: '',
-    astValid: false,
-    securityPassed: false,
-  }));
+  // TEST_SCRIPT — stub
   router.on('TEST_SCRIPT', async () => ({
     ok: false,
     error: 'Test script handler not fully wired in test',
@@ -699,17 +694,6 @@ describe('Execution handlers', () => {
 });
 
 describe('Script generation handlers', () => {
-  it('GENERATE_SCRIPT returns observation data', async () => {
-    const result = await router.handleMessage(
-      { type: 'GENERATE_SCRIPT', tabId: 1, description: 'test', domains: ['example.com'] } as any,
-      {} as any,
-    );
-    // Stub returns empty source
-    expect(result).toHaveProperty('source');
-    expect(result).toHaveProperty('astValid');
-    expect(result).toHaveProperty('securityPassed');
-  });
-
   it('TEST_SCRIPT returns result', async () => {
     const result = (await router.handleMessage(
       { type: 'TEST_SCRIPT', tabId: 1, source: 'function run() {}', domains: ['example.com'] } as any,
@@ -872,7 +856,6 @@ describe('All message types have handlers', () => {
     'EXECUTE_TASK',
     'CANCEL_EXECUTION',
     'GET_RUNS',
-    'GENERATE_SCRIPT',
     'TEST_SCRIPT',
     'GET_A11Y_TREE',
     'SCREENSHOT',
@@ -890,14 +873,22 @@ describe('All message types have handlers', () => {
 
   for (const type of messageTypes) {
     it(`has handler for ${type}`, async () => {
-      // Verify no "Unknown message type" error
-      const result = await router.handleMessage(
-        { type } as any,
-        {} as any,
-      );
-      // Should not be an error response about unknown type
-      if (result && typeof result === 'object' && 'error' in result) {
-        expect((result as any).error).not.toContain('Unknown message type');
+      // Verify no "Unknown message type" error — handler may throw for
+      // other reasons (bad test data), which is fine as long as the
+      // error isn't about missing handler registration.
+      try {
+        const result = await router.handleMessage(
+          { type } as any,
+          {} as any,
+        );
+        // If it resolved, check it's not an unknown-type error
+        if (result && typeof result === 'object' && 'error' in result) {
+          expect((result as any).error).not.toContain('Unknown message type');
+        }
+      } catch {
+        // Handler threw — that's fine, it means a handler IS registered.
+        // Only "Unknown message type" errors indicate a missing handler,
+        // and those are returned as resolved values, not thrown.
       }
     });
   }

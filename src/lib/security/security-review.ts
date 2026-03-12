@@ -1,45 +1,12 @@
 import { complete } from '@mariozechner/pi-ai';
-import type { Context, Message, UserMessage, AssistantMessage } from '@mariozechner/pi-ai';
 import type { ModelLike } from '../pi-ai-bridge';
+import { toContext, extractText } from '../llm-helpers';
 import type { ReviewDetail } from '../../types';
 import { buildReviewMessages } from './review-prompts';
 
 export interface SecurityReviewResult {
   approved: boolean;
   details: ReviewDetail[];
-}
-
-/**
- * Convert the messages array from buildReviewMessages into a pi-ai Context.
- */
-function toContext(
-  rawMessages: Array<{ role: string; content: string }>,
-): Context {
-  const systemPrompt = rawMessages
-    .filter((m) => m.role === 'system')
-    .map((m) => m.content)
-    .join('\n');
-
-  const messages: Message[] = rawMessages
-    .filter((m) => m.role !== 'system')
-    .map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-      timestamp: Date.now(),
-    })) as UserMessage[];
-
-  return { systemPrompt, messages };
-}
-
-/**
- * Extract the text content from a pi-ai AssistantMessage.
- */
-function extractText(result: AssistantMessage): string {
-  if (!result.content || !Array.isArray(result.content)) return '';
-  return result.content
-    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-    .map((part) => part.text)
-    .join('');
 }
 
 /**

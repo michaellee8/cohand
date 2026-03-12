@@ -21,7 +21,6 @@ vi.mock('@mariozechner/pi-ai', () => ({
 }));
 
 import {
-  observePage,
   generateScript,
   repairScript,
   cleanScriptSource,
@@ -49,7 +48,7 @@ function mockAssistantMessage(text: string) {
   };
 }
 
-const fakeModel = { id: 'test-model', name: 'test-model', api: 'openai-completions', provider: 'openai', baseUrl: '', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 16384 };
+const fakeModel = { id: 'test-model', name: 'test-model', api: 'openai-completions', provider: 'openai', baseUrl: '', reasoning: false, input: ['text'] as ('text' | 'image')[], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 16384 };
 const fakeApiKey = 'test-api-key';
 
 describe('cleanScriptSource', () => {
@@ -82,64 +81,6 @@ describe('cleanScriptSource', () => {
     const input = '```javascript\nasync function run(page) {}';
     // No closing ```, so it just strips the opening line
     expect(cleanScriptSource(input)).toBe('async function run(page) {}');
-  });
-});
-
-describe('observePage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('gets a11y tree and screenshot', async () => {
-    const mockTree = { role: 'main', name: 'Page', children: [] };
-    mockSendMessage.mockResolvedValueOnce(mockTree);
-    mockTabsGet.mockResolvedValueOnce({
-      windowId: 1,
-      url: 'https://example.com',
-      title: 'Example',
-    });
-    mockCaptureVisibleTab.mockResolvedValueOnce('data:image/png;base64,abc123');
-
-    const result = await observePage(42);
-
-    expect(mockSendMessage).toHaveBeenCalledWith({ type: 'GET_A11Y_TREE', tabId: 42 });
-    expect(mockTabsGet).toHaveBeenCalledWith(42);
-    expect(mockCaptureVisibleTab).toHaveBeenCalledWith(1, { format: 'png' });
-    expect(result).toEqual({
-      a11yTree: JSON.stringify(mockTree, null, 2),
-      screenshot: 'data:image/png;base64,abc123',
-      url: 'https://example.com',
-      title: 'Example',
-    });
-  });
-
-  it('handles screenshot failure gracefully', async () => {
-    const mockTree = { role: 'main', name: 'Page' };
-    mockSendMessage.mockResolvedValueOnce(mockTree);
-    mockTabsGet.mockResolvedValueOnce({
-      windowId: 1,
-      url: 'chrome://extensions',
-      title: 'Extensions',
-    });
-    mockCaptureVisibleTab.mockRejectedValueOnce(new Error('Cannot capture restricted page'));
-
-    const result = await observePage(99);
-
-    expect(result.screenshot).toBeUndefined();
-    expect(result.url).toBe('chrome://extensions');
-    expect(result.title).toBe('Extensions');
-    expect(result.a11yTree).toBe(JSON.stringify(mockTree, null, 2));
-  });
-
-  it('returns empty strings when tab has no url or title', async () => {
-    mockSendMessage.mockResolvedValueOnce({});
-    mockTabsGet.mockResolvedValueOnce({ windowId: 1 });
-    mockCaptureVisibleTab.mockResolvedValueOnce('data:image/png;base64,xyz');
-
-    const result = await observePage(1);
-
-    expect(result.url).toBe('');
-    expect(result.title).toBe('');
   });
 });
 

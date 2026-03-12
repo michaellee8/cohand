@@ -23,10 +23,24 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
 
   useEffect(() => { useSettingsStore.getState().load(); }, []);
 
-  if (loading || !settings) {
+  if (loading && !settings) {
     return (
       <div className="h-screen flex items-center justify-center text-gray-400 text-sm">
         Loading settings...
+      </div>
+    );
+  }
+
+  if (!settings) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center gap-3 p-4">
+        <p className="text-sm text-red-600">Failed to load settings</p>
+        <button
+          onClick={() => useSettingsStore.getState().load()}
+          className="text-sm text-blue-500 hover:text-blue-700"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -155,8 +169,8 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                       setImportError(null);
                       const text = await file.text();
                       await importCodexAuth(text);
-                    } catch (err: any) {
-                      setImportError(err?.message ?? String(err));
+                    } catch (err: unknown) {
+                      setImportError(err instanceof Error ? err.message : String(err));
                     }
                     e.target.value = '';
                   }}
@@ -204,8 +218,8 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                             await importCodexAuth(pasteJsonInput);
                             setPasteJsonInput('');
                             setShowPasteJson(false);
-                          } catch (err: any) {
-                            setImportError(err?.message ?? String(err));
+                          } catch (err: unknown) {
+                            setImportError(err instanceof Error ? err.message : String(err));
                           }
                         }}
                         disabled={!pasteJsonInput.trim()}
