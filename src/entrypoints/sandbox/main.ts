@@ -1,33 +1,17 @@
-// Sandbox-side: handles script execution requests and sends RPCs to parent
-// NOTE: Uses `new Function` as a TEMPORARY placeholder.
-// The real implementation (Task 6.2) will use QuickJS WASM.
-console.log('[Cohand] Sandbox loaded');
+// Sandbox-side: executes scripts in QuickJS WASM isolation.
+// Scripts have NO access to browser globals — only the page proxy and context.
+import { createQuickJSExecutor } from '../../lib/quickjs-runner';
+
+console.log('[Cohand] Sandbox loaded (QuickJS WASM)');
 
 // Extension origin for targeted postMessage
 const PARENT_ORIGIN = (() => {
   try { return new URL(chrome.runtime.getURL('')).origin; } catch { return '*'; }
 })();
 
-// Pending RPC callbacks
+// Pending RPC callbacks — used by quickjs-runner's rpcCallback to send RPCs to parent
 const pendingRPCs = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 let rpcNextId = 1;
-
-// Create a proxy object that scripts will use as `page`
-function createPageProxy(taskId: string): Record<string, (...args: unknown[]) => Promise<unknown>> {
-  const methods = [
-    'goto', 'click', 'fill', 'type', 'scroll',
-    'waitForSelector', 'waitForLoadState',
-    'url', 'title', 'getByRole', 'getByText', 'getByLabel', 'locator',
-  ];
-
-  const proxy: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
-  for (const method of methods) {
-    proxy[method] = (...args: unknown[]) => {
-      return sendRPC(taskId, method, { args });
-    };
-  }
-  return proxy;
-}
 
 function sendRPC(taskId: string, method: string, args: Record<string, unknown>): Promise<unknown> {
   const id = rpcNextId++;
@@ -53,28 +37,23 @@ window.addEventListener('message', async (event) => {
 
   if (data.type === 'execute-script') {
     const { executionId, taskId, source, state } = data;
-    const page = createPageProxy(taskId);
-    const context = {
-      state: { ...state },
-      url: '', // filled by task
-      notify: (message: string) => sendRPC(taskId, 'notify', { message }),
-    };
 
     try {
-      // Create and execute the script function
-      const fn = new Function('page', 'context', `
-        return (async () => {
-          ${source}
-          return typeof run === 'function' ? await run(page, context) : undefined;
-        })();
-      `);
-      const result = await fn(page, context);
+      const result = await createQuickJSExecutor(
+        source,
+        taskId,
+        state || {},
+        // RPC callback: forward to parent via postMessage
+        (tid, method, args) => sendRPC(tid, method, args),
+      );
+
       window.parent.postMessage({
         type: 'execute-script-result',
         executionId,
-        ok: true,
-        result,
-        state: context.state,
+        ok: result.ok,
+        result: result.result,
+        state: result.state,
+        error: result.error,
       }, PARENT_ORIGIN);
     } catch (err: any) {
       window.parent.postMessage({
