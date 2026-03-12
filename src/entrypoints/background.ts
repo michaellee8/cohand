@@ -386,10 +386,20 @@ export default defineBackground(() => {
 
   router.on('SCREENSHOT', async (msg) => {
     const tab = await chrome.tabs.get(msg.tabId);
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId!, {
-      format: 'png',
-    });
-    return { dataUrl };
+    if (tab.windowId == null) {
+      return { dataUrl: null, error: 'Tab has no associated window' };
+    }
+    try {
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+        format: 'png',
+      });
+      return { dataUrl };
+    } catch (err) {
+      return {
+        dataUrl: null,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   });
 
   // ---------------------------------------------------------------------------

@@ -202,10 +202,20 @@ beforeEach(async () => {
   // SCREENSHOT
   router.on('SCREENSHOT', async (msg) => {
     const tab = await chrome.tabs.get(msg.tabId);
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId!, {
-      format: 'png',
-    });
-    return { dataUrl };
+    if (tab.windowId == null) {
+      return { dataUrl: null, error: 'Tab has no associated window' };
+    }
+    try {
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+        format: 'png',
+      });
+      return { dataUrl };
+    } catch (err) {
+      return {
+        dataUrl: null,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   });
 
   // ATTACH_DEBUGGER / DETACH_DEBUGGER
@@ -441,6 +451,37 @@ describe('Page observation handlers', () => {
 
     expect(result.dataUrl).toBe('data:image/png;base64,abc');
     expect(chrome.tabs.captureVisibleTab).toHaveBeenCalled();
+  });
+
+  it('SCREENSHOT returns error when captureVisibleTab fails', async () => {
+    (chrome.tabs.captureVisibleTab as any).mockRejectedValueOnce(
+      new Error('Cannot capture restricted page'),
+    );
+
+    const result = (await router.handleMessage(
+      { type: 'SCREENSHOT', tabId: 1 },
+      {} as any,
+    )) as { dataUrl: string | null; error: string };
+
+    expect(result.dataUrl).toBeNull();
+    expect(result.error).toBe('Cannot capture restricted page');
+  });
+
+  it('SCREENSHOT returns error when tab has no windowId', async () => {
+    (chrome.tabs.get as any).mockResolvedValueOnce({
+      id: 1,
+      url: 'https://example.com',
+      title: 'Example',
+      windowId: undefined,
+    });
+
+    const result = (await router.handleMessage(
+      { type: 'SCREENSHOT', tabId: 1 },
+      {} as any,
+    )) as { dataUrl: string | null; error: string };
+
+    expect(result.dataUrl).toBeNull();
+    expect(result.error).toBe('Tab has no associated window');
   });
 });
 

@@ -467,16 +467,16 @@ export function registerPageMethods(
     }),
   );
 
-  // notify -- special method, not a page action
-  handler.register(
-    'notify',
-    makeHandler(async (rpc) => {
-      // Notify is handled by the service worker's notification system
-      // This just passes through
-      return {
+  // notify -- special method, not a page action.
+  // Registered directly (no makeHandler) because notify doesn't interact with
+  // the page and should not require domain validation.
+  handler.register('notify', async (rpc) => {
+    return {
+      ok: true,
+      value: {
         queued: true,
         message: (rpc.args as { message?: string }).message,
-      };
-    }),
-  );
+      },
+    };
+  });
 }

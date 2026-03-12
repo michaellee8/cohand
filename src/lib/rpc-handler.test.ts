@@ -72,7 +72,7 @@ describe('RPCHandler', () => {
     expect(port.postMessage).toHaveBeenCalledWith({
       id: 2,
       ok: false,
-      error: { type: 'SelectorNotFound', message: 'Unknown RPC method: nonexistent' },
+      error: { type: 'Unknown', message: 'Unknown RPC method: nonexistent' },
     });
   });
 

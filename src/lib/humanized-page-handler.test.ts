@@ -602,6 +602,20 @@ describe('registerPageMethods', () => {
     });
   });
 
+  it('notify: does not require domain validation', async () => {
+    // Set tab URL to a disallowed domain — notify should still succeed
+    vi.mocked(ctx.getTabUrl).mockResolvedValue('https://evil.com/page');
+
+    const rpc = makeRPC('notify', { message: 'Still works' });
+    const result = await invokeRPC(handler, rpc);
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toEqual({
+      queued: true,
+      message: 'Still works',
+    });
+  });
+
   // ---- waitForLoadState ----
 
   it('waitForLoadState: resolves after delay', async () => {

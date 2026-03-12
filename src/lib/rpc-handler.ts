@@ -31,7 +31,7 @@ export class RPCHandler {
         port.postMessage({
           id: rpc.id,
           ok: false,
-          error: { type: 'SelectorNotFound', message: `Unknown RPC method: ${rpc.method}` },
+          error: { type: 'Unknown', message: `Unknown RPC method: ${rpc.method}` },
         } satisfies ScriptRPCResult);
         return;
       }
