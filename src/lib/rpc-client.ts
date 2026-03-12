@@ -79,6 +79,13 @@ export class RPCClient {
   }
 
   disconnect(): void {
+    // Reject all pending RPCs before disconnecting
+    for (const [, entry] of this.pending) {
+      clearTimeout(entry.timer);
+      entry.reject(new RPCError({ type: 'OwnerDisconnected', message: 'Client disconnected' }));
+    }
+    this.pending.clear();
+
     if (this.port) {
       this.port.disconnect();
       this.port = null;

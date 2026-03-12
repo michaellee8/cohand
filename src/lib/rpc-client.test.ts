@@ -156,6 +156,61 @@ describe('RPCClient', () => {
     expect(client.isConnected).toBe(false);
   });
 
+  it('disconnect() rejects all pending RPCs', async () => {
+    client.connect();
+
+    const call1 = client.call('click', { selector: '#a' }, 'task-d1');
+    const call2 = client.call('fill', { selector: '#b', value: 'hi' }, 'task-d1');
+
+    expect(client.pendingCount).toBe(2);
+
+    client.disconnect();
+
+    await expect(call1).rejects.toThrow(RPCError);
+    await expect(call1).rejects.toMatchObject({
+      type: 'OwnerDisconnected',
+      message: 'Client disconnected',
+    });
+    await expect(call2).rejects.toThrow(RPCError);
+    await expect(call2).rejects.toMatchObject({
+      type: 'OwnerDisconnected',
+      message: 'Client disconnected',
+    });
+    expect(client.pendingCount).toBe(0);
+  });
+
+  it('disconnect() clears pending timers', async () => {
+    client.connect();
+
+    const call1 = client.call('click', { selector: '#a' }, 'task-d2').catch(() => {});
+    const call2 = client.call('fill', { selector: '#b', value: 'x' }, 'task-d2').catch(() => {});
+
+    expect(client.pendingCount).toBe(2);
+
+    client.disconnect();
+
+    await call1;
+    await call2;
+
+    // If timers were not cleared, advancing time would cause issues.
+    // With fake timers we can verify no timeout fires after disconnect.
+    expect(client.pendingCount).toBe(0);
+    // Advance past any potential timeout — should not throw
+    vi.advanceTimersByTime(60_000);
+    expect(client.pendingCount).toBe(0);
+  });
+
+  it('disconnect() with no pending RPCs still disconnects port', () => {
+    client.connect();
+    expect(client.pendingCount).toBe(0);
+
+    client.disconnect();
+
+    expect(mockPort.port.disconnect).toHaveBeenCalledOnce();
+    expect(client.isConnected).toBe(false);
+    expect(client.pendingCount).toBe(0);
+  });
+
   it('ignores responses for unknown ids', async () => {
     client.connect();
 
