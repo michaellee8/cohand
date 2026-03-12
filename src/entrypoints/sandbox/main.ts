@@ -52,7 +52,7 @@ window.addEventListener('message', async (event) => {
   }
 
   if (data.type === 'execute-script') {
-    const { taskId, source, state } = data;
+    const { executionId, taskId, source, state } = data;
     const page = createPageProxy(taskId);
     const context = {
       state: { ...state },
@@ -71,6 +71,7 @@ window.addEventListener('message', async (event) => {
       const result = await fn(page, context);
       window.parent.postMessage({
         type: 'execute-script-result',
+        executionId,
         ok: true,
         result,
         state: context.state,
@@ -78,6 +79,7 @@ window.addEventListener('message', async (event) => {
     } catch (err: any) {
       window.parent.postMessage({
         type: 'execute-script-result',
+        executionId,
         ok: false,
         error: err.message || String(err),
       }, PARENT_ORIGIN);

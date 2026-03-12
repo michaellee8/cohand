@@ -138,6 +138,7 @@ describe('SandboxBridge', () => {
 
     bridge.executeScript({
       type: 'execute-script',
+      executionId: 'exec-1',
       taskId: 'task-4',
       source: 'await page.click("#btn");',
       state: { step: 1 },
@@ -147,6 +148,7 @@ describe('SandboxBridge', () => {
     expect(mockIframe.contentWindow.postMessage).toHaveBeenCalledWith(
       {
         type: 'execute-script',
+        executionId: 'exec-1',
         taskId: 'task-4',
         source: 'await page.click("#btn");',
         state: { step: 1 },
@@ -165,6 +167,7 @@ describe('SandboxBridge', () => {
 
     const resultMsg: ExecuteScriptResult = {
       type: 'execute-script-result',
+      executionId: 'exec-10',
       ok: true,
       result: { data: 'scraped' },
       state: { step: 2 },
@@ -252,6 +255,7 @@ describe('SandboxBridge', () => {
 
     bridge.executeScript({
       type: 'execute-script',
+      executionId: 'exec-origin',
       taskId: 'task-origin',
       source: 'test',
       state: {},
@@ -263,5 +267,65 @@ describe('SandboxBridge', () => {
     const call = mockIframe.contentWindow.postMessage.mock.calls[0];
     expect(call.length).toBe(2);
     expect(call[1]).toBeDefined();
+  });
+
+  it('includes executionId in execute-script requests', () => {
+    bridge.init(mockIframe.iframe);
+
+    bridge.executeScript({
+      type: 'execute-script',
+      executionId: 'exec-abc-123',
+      taskId: 'task-6',
+      source: 'await page.goto("https://example.com");',
+      state: {},
+      tabId: 42,
+    });
+
+    const postedData = mockIframe.contentWindow.postMessage.mock.calls[0][0];
+    expect(postedData.executionId).toBe('exec-abc-123');
+  });
+
+  it('onExecutionResult with executionId filter only resolves matching results', async () => {
+    bridge.init(mockIframe.iframe);
+
+    const received: ExecuteScriptResult[] = [];
+
+    // Listen only for executionId 'exec-match'
+    bridge.onExecutionResult((res) => {
+      received.push(res);
+    }, 'exec-match');
+
+    // Dispatch a non-matching result
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'execute-script-result',
+          executionId: 'exec-other',
+          ok: true,
+          result: 'wrong',
+        },
+        source: mockIframe.contentWindow as any,
+      }),
+    );
+
+    // Dispatch a matching result
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'execute-script-result',
+          executionId: 'exec-match',
+          ok: true,
+          result: 'correct',
+        },
+        source: mockIframe.contentWindow as any,
+      }),
+    );
+
+    // Give a tick for synchronous handlers to fire
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(received).toHaveLength(1);
+    expect(received[0].result).toBe('correct');
+    expect(received[0].executionId).toBe('exec-match');
   });
 });

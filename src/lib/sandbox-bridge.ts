@@ -19,6 +19,7 @@ export interface SandboxResponse {
 
 export interface ExecuteScriptRequest {
   type: 'execute-script';
+  executionId: string;
   taskId: string;
   source: string;
   state: Record<string, unknown>;
@@ -27,6 +28,7 @@ export interface ExecuteScriptRequest {
 
 export interface ExecuteScriptResult {
   type: 'execute-script-result';
+  executionId: string;
   ok: boolean;
   result?: unknown;
   state?: Record<string, unknown>;
@@ -88,10 +90,12 @@ export class SandboxBridge {
   }
 
   // Listen for execution results from sandbox. Returns cleanup function.
-  onExecutionResult(callback: (result: ExecuteScriptResult) => void): () => void {
+  // If executionId is provided, only results matching that ID will be delivered.
+  onExecutionResult(callback: (result: ExecuteScriptResult) => void, executionId?: string): () => void {
     const handler = (event: MessageEvent) => {
       if (event.source !== this.iframe?.contentWindow) return;
       if (event.data.type === 'execute-script-result') {
+        if (executionId && event.data.executionId !== executionId) return;
         callback(event.data as ExecuteScriptResult);
       }
     };

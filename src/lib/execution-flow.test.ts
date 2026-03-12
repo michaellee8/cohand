@@ -355,6 +355,7 @@ describe('SandboxBridge execution flow', () => {
 
     bridge.executeScript({
       type: 'execute-script',
+      executionId: 'exec-flow-1',
       taskId: 'task-1',
       source: 'async function run(page) { return 42; }',
       state: {},
@@ -390,6 +391,7 @@ describe('SandboxBridge execution flow', () => {
     const event = new MessageEvent('message', {
       data: {
         type: 'execute-script-result',
+        executionId: 'exec-flow-2',
         ok: true,
         result: { price: '$42' },
         state: { lastPrice: '$42' },

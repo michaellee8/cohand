@@ -44,14 +44,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       // Set up result listener before sending execution request
       const result = await new Promise<ExecuteScriptResult>((resolve) => {
+        const executionId = crypto.randomUUID();
         let cleanup: (() => void) | undefined;
+
+        // Set up listener BEFORE sending (to avoid race)
         cleanup = bridge.onExecutionResult((res) => {
           cleanup?.();
           resolve(res);
-        });
+        }, executionId);
 
         bridge.executeScript({
           type: 'execute-script',
+          executionId,
           taskId,
           source,
           state: state ?? {},
