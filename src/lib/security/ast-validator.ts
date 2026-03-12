@@ -108,7 +108,7 @@ export function validateAST(source: string): ASTValidationResult {
           if (n.type === 'Literal' && typeof n.value === 'string') {
             const lower = n.value.toLowerCase();
             return ['constructor', '__proto__', 'prototype', 'eval', 'function'].some(
-              blocked => lower.includes(blocked) || blocked.includes(lower)
+              blocked => lower.includes(blocked)
             );
           }
           return false;
