@@ -155,5 +155,37 @@ describe('validateAST', () => {
       const result = validateAST("const x = fn`template`");
       expect(result.valid).toBe(false);
     });
+
+    it('blocks non-literal computed access on any object', () => {
+      const result = validateAST(`const key = 'constructor'; page[key]()`);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('non-literal computed'))).toBe(true);
+    });
+
+    it('blocks string concatenation to build blocked member names', () => {
+      const result = validateAST(`page['constr' + 'uctor']('return 1')()`);
+      expect(result.valid).toBe(false);
+    });
+
+    it('blocks prototype chain access via variable', () => {
+      const result = validateAST(`const c = 'constructor'; [].fill[c]('return fetch')()`);
+      expect(result.valid).toBe(false);
+    });
+
+    it('blocks template literal computed access', () => {
+      const result = validateAST("page[`constructor`]()");
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('constructor'))).toBe(true);
+    });
+
+    it('allows safe computed access with number literals', () => {
+      const result = validateAST(`const arr = [1,2,3]; arr[0]`);
+      expect(result.valid).toBe(true);
+    });
+
+    it('allows safe computed access with string literals not in blocklist', () => {
+      const result = validateAST(`const obj = {}; obj['name']`);
+      expect(result.valid).toBe(true);
+    });
   });
 });
