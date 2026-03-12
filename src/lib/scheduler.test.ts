@@ -82,6 +82,30 @@ describe('scheduleTask', () => {
     });
   });
 
+  it('enforces minimum 1-minute interval', async () => {
+    const task = makeTask({
+      id: 'low-interval',
+      schedule: { type: 'interval', intervalMinutes: 0 },
+    });
+    await scheduleTask(task);
+    expect(chrome.alarms.create).toHaveBeenCalledWith('task:low-interval', {
+      periodInMinutes: 1,
+      delayInMinutes: 1,
+    });
+  });
+
+  it('enforces minimum 1-minute interval for negative values', async () => {
+    const task = makeTask({
+      id: 'neg-interval',
+      schedule: { type: 'interval', intervalMinutes: -5 },
+    });
+    await scheduleTask(task);
+    expect(chrome.alarms.create).toHaveBeenCalledWith('task:neg-interval', {
+      periodInMinutes: 1,
+      delayInMinutes: 1,
+    });
+  });
+
   it('skips manual tasks and clears any existing alarm', async () => {
     const task = makeTask({
       id: 'manual-1',

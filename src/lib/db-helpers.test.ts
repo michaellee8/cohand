@@ -19,9 +19,6 @@ import {
   capStateSnapshots,
   putNotification,
   getNotification,
-  getRecentNotifications,
-  getUnreadCount,
-  markNotificationRead,
   isNotificationRateLimited,
   putLlmUsage,
   getLlmUsageForTask,
@@ -34,6 +31,11 @@ import {
   getRecordingPageSnapshots,
   deleteRecording,
 } from './db-helpers';
+import {
+  getRecentNotifications,
+  markAsRead,
+  getUnreadCount,
+} from './notifications';
 import type {
   Task,
   ScriptVersion,
@@ -393,23 +395,23 @@ describe('Notifications', () => {
     expect(count).toBe(2);
   });
 
-  it('markNotificationRead updates isRead from 0 to 1', async () => {
+  it('markAsRead updates isRead from 0 to 1', async () => {
     await putNotification(db, makeNotification({ id: 'n1', isRead: 0 }));
-    await markNotificationRead(db, 'n1');
+    await markAsRead(db, 'n1');
     const result = await getNotification(db, 'n1');
     expect(result?.isRead).toBe(1);
   });
 
-  it('markNotificationRead is a no-op for already-read notification', async () => {
+  it('markAsRead is a no-op for already-read notification', async () => {
     await putNotification(db, makeNotification({ id: 'n1', isRead: 1 }));
-    await markNotificationRead(db, 'n1');
+    await markAsRead(db, 'n1');
     const result = await getNotification(db, 'n1');
     expect(result?.isRead).toBe(1);
   });
 
-  it('markNotificationRead is a no-op for missing notification', async () => {
+  it('markAsRead is a no-op for missing notification', async () => {
     // Should not throw
-    await markNotificationRead(db, 'does-not-exist');
+    await markAsRead(db, 'does-not-exist');
   });
 
   it('isNotificationRateLimited returns true when 10+ recent notifications', async () => {

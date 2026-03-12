@@ -95,10 +95,3 @@ export interface RecordingPageSnapshot {
   tree: unknown;
   capturedAt: string;
 }
-
-export interface EncryptedCodexOAuth {
-  access: string;
-  refresh: string;
-  expires: number;
-  accountId: string;
-}

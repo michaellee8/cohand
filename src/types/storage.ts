@@ -1,4 +1,9 @@
-import type { EncryptedCodexOAuth } from './recording';
+export interface EncryptedCodexOAuth {
+  access: string;
+  refresh: string;
+  expires: number;
+  accountId: string;
+}
 
 export interface StorageLocal {
   _storageSchemaVersion: number;

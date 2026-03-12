@@ -232,30 +232,6 @@ export const putNotification = (db: IDBDatabase, notif: TaskNotification) =>
 export const getNotification = (db: IDBDatabase, id: string) =>
   getRecord<TaskNotification>(db, 'notifications', id);
 
-export async function getRecentNotifications(
-  db: IDBDatabase,
-  limit: number = 50,
-): Promise<TaskNotification[]> {
-  const all = await getAllRecords<TaskNotification>(db, 'notifications');
-  all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return all.slice(0, limit);
-}
-
-export async function getUnreadCount(db: IDBDatabase): Promise<number> {
-  return countByIndex(db, 'notifications', 'by_read_status', 0);
-}
-
-export async function markNotificationRead(
-  db: IDBDatabase,
-  id: string,
-): Promise<void> {
-  const notif = await getNotification(db, id);
-  if (notif && notif.isRead === 0) {
-    notif.isRead = 1;
-    await putNotification(db, notif);
-  }
-}
-
 /** Check rate limit: MAX_NOTIFICATIONS_PER_TASK_PER_HOUR per task per hour. */
 export async function isNotificationRateLimited(
   db: IDBDatabase,

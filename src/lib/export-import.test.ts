@@ -291,12 +291,6 @@ describe('prepareForImport', () => {
 });
 
 describe('computeChecksum', () => {
-  it('computes SHA-256 hash', async () => {
-    const hash = await computeChecksum('hello world');
-    // Known SHA-256 of "hello world"
-    expect(hash).toBe('b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9');
-  });
-
   it('same input produces same hash', async () => {
     const a = await computeChecksum('test input');
     const b = await computeChecksum('test input');

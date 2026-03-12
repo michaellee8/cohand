@@ -12,10 +12,11 @@ export async function scheduleTask(task: Task): Promise<void> {
     return;
   }
 
+  const interval = Math.max(1, task.schedule.intervalMinutes);
   await chrome.alarms.create(`${ALARM_PREFIX}${task.id}`, {
-    periodInMinutes: task.schedule.intervalMinutes,
+    periodInMinutes: interval,
     // First fire after one interval period
-    delayInMinutes: task.schedule.intervalMinutes,
+    delayInMinutes: interval,
   });
 }
 
