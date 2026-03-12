@@ -494,6 +494,32 @@ export default defineBackground(() => {
   });
 
   router.on('RECORDING_ACTION', async (msg, sender) => {
+    // Validate action type to reject unexpected values
+    const ALLOWED_ACTION_TYPES = ['click', 'type', 'navigate'] as const;
+    type AllowedAction = (typeof ALLOWED_ACTION_TYPES)[number];
+    if (!ALLOWED_ACTION_TYPES.includes(msg.action?.action as AllowedAction)) {
+      console.warn('[Cohand] Invalid recording action type:', msg.action?.action);
+      return { ok: true as const };
+    }
+
+    // Sanitize: extract only known fields from msg.action (never spread untrusted data)
+    const raw = msg.action;
+    const sanitizedAction: Omit<RecordingStep, 'id' | 'recordingId' | 'sequenceIndex' | 'status' | 'screenshot'> = {
+      action: raw.action,
+      ...(raw.timestamp !== undefined && { timestamp: raw.timestamp }),
+      ...(raw.selector !== undefined && { selector: raw.selector }),
+      ...(raw.elementTag !== undefined && { elementTag: raw.elementTag }),
+      ...(raw.elementText !== undefined && { elementText: raw.elementText }),
+      ...(raw.elementAttributes !== undefined && { elementAttributes: raw.elementAttributes }),
+      ...(raw.elementRole !== undefined && { elementRole: raw.elementRole }),
+      ...(raw.a11ySubtree !== undefined && { a11ySubtree: raw.a11ySubtree }),
+      ...(raw.typedText !== undefined && { typedText: raw.typedText }),
+      ...(raw.url !== undefined && { url: raw.url }),
+      ...(raw.pageTitle !== undefined && { pageTitle: raw.pageTitle }),
+      ...(raw.viewportDimensions !== undefined && { viewportDimensions: raw.viewportDimensions }),
+      ...(raw.clickPositionHint !== undefined && { clickPositionHint: raw.clickPositionHint }),
+    };
+
     // Fire-and-forget enrichment (screenshot + persist + forward)
     // Return { ok: true } immediately; enrichment runs in background.
     (async () => {
@@ -516,7 +542,7 @@ export default defineBackground(() => {
           recordingId: '', // Set by the sidepanel store
           sequenceIndex: 0, // Set by the sidepanel store
           status: 'enriched',
-          ...msg.action,
+          ...sanitizedAction,
           screenshot,
         };
 

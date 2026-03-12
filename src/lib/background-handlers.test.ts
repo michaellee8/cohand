@@ -31,7 +31,11 @@ import {
   removeDomainPermission,
   getDomainPermissions,
 } from './storage';
-import type { Task, ScriptVersion, ScriptRun, TaskNotification } from '../types/index';
+import {
+  putRecordingStep,
+  getRecordingSteps,
+} from './db-helpers';
+import type { Task, ScriptVersion, ScriptRun, TaskNotification, RecordingStep } from '../types/index';
 
 // ---------------------------------------------------------------------------
 // Chrome API mocks
@@ -110,6 +114,8 @@ function setupChromeMock() {
 // ---------------------------------------------------------------------------
 let db: IDBDatabase;
 let router: MessageRouter;
+let lastRecordingStep: RecordingStep | null = null;
+let recordingPortMock: { postMessage: ReturnType<typeof vi.fn> } | null = null;
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -273,8 +279,65 @@ beforeEach(async () => {
   router.on('EXECUTE_TASK', async () => ({ ok: true as const }));
   router.on('CANCEL_EXECUTION', async () => ({ ok: true as const }));
 
-  // RECORDING_ACTION — stub (fire-and-forget enrichment not tested here)
-  router.on('RECORDING_ACTION', async () => ({ ok: true as const }));
+  // RECORDING_ACTION — sanitizing handler (mirrors background.ts logic)
+  lastRecordingStep = null;
+  recordingPortMock = { postMessage: vi.fn() };
+  router.on('RECORDING_ACTION', async (msg, sender) => {
+    const ALLOWED_ACTION_TYPES = ['click', 'type', 'navigate'] as const;
+    type AllowedAction = (typeof ALLOWED_ACTION_TYPES)[number];
+    if (!ALLOWED_ACTION_TYPES.includes(msg.action?.action as AllowedAction)) {
+      console.warn('[Cohand] Invalid recording action type:', msg.action?.action);
+      return { ok: true as const };
+    }
+
+    const raw = msg.action;
+    const sanitizedAction: Omit<RecordingStep, 'id' | 'recordingId' | 'sequenceIndex' | 'status' | 'screenshot'> = {
+      action: raw.action,
+      ...(raw.timestamp !== undefined && { timestamp: raw.timestamp }),
+      ...(raw.selector !== undefined && { selector: raw.selector }),
+      ...(raw.elementTag !== undefined && { elementTag: raw.elementTag }),
+      ...(raw.elementText !== undefined && { elementText: raw.elementText }),
+      ...(raw.elementAttributes !== undefined && { elementAttributes: raw.elementAttributes }),
+      ...(raw.elementRole !== undefined && { elementRole: raw.elementRole }),
+      ...(raw.a11ySubtree !== undefined && { a11ySubtree: raw.a11ySubtree }),
+      ...(raw.typedText !== undefined && { typedText: raw.typedText }),
+      ...(raw.url !== undefined && { url: raw.url }),
+      ...(raw.pageTitle !== undefined && { pageTitle: raw.pageTitle }),
+      ...(raw.viewportDimensions !== undefined && { viewportDimensions: raw.viewportDimensions }),
+      ...(raw.clickPositionHint !== undefined && { clickPositionHint: raw.clickPositionHint }),
+    };
+
+    // Synchronous version for testing (background.ts does fire-and-forget)
+    let screenshot: string | undefined;
+    try {
+      if (sender.tab?.windowId != null) {
+        screenshot = await chrome.tabs.captureVisibleTab(
+          sender.tab.windowId,
+          { format: 'png' },
+        );
+      }
+    } catch {
+      // Screenshot may fail
+    }
+
+    const step: RecordingStep = {
+      id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      recordingId: '',
+      sequenceIndex: 0,
+      status: 'enriched',
+      ...sanitizedAction,
+      screenshot,
+    };
+
+    lastRecordingStep = step;
+
+    const { screenshot: _s, ...stepWithoutScreenshot } = step;
+    await putRecordingStep(db, stepWithoutScreenshot as any);
+
+    recordingPortMock?.postMessage({ type: 'RECORDING_STEP', step });
+
+    return { ok: true as const };
+  });
 
   // GENERATE_SCRIPT / TEST_SCRIPT — stubs
   router.on('GENERATE_SCRIPT', async () => ({
@@ -653,6 +716,149 @@ describe('Script generation handlers', () => {
       {} as any,
     )) as any;
     expect(result).toHaveProperty('ok');
+  });
+});
+
+describe('RECORDING_ACTION sanitization (H2)', () => {
+  it('only passes known fields from action, stripping unknown properties', async () => {
+    const maliciousAction = {
+      action: 'click' as const,
+      timestamp: 1234567890,
+      selector: '#btn',
+      elementTag: 'button',
+      // Unknown / injected properties that should be stripped:
+      __proto__: { polluted: true },
+      constructor: 'evil',
+      toString: 'hacked',
+      maliciousField: 'should-not-appear',
+      extraNested: { deep: 'injection' },
+    };
+
+    const result = await router.handleMessage(
+      { type: 'RECORDING_ACTION', action: maliciousAction } as any,
+      { tab: { windowId: 1 } } as any,
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(lastRecordingStep).not.toBeNull();
+
+    // Verify known fields are present
+    expect(lastRecordingStep!.action).toBe('click');
+    expect(lastRecordingStep!.selector).toBe('#btn');
+    expect(lastRecordingStep!.elementTag).toBe('button');
+
+    // Verify service-worker-controlled fields are set
+    expect(lastRecordingStep!.id).toMatch(/^step-/);
+    expect(lastRecordingStep!.recordingId).toBe('');
+    expect(lastRecordingStep!.sequenceIndex).toBe(0);
+    expect(lastRecordingStep!.status).toBe('enriched');
+
+    // Verify unknown properties are NOT present
+    expect(lastRecordingStep).not.toHaveProperty('maliciousField');
+    expect(lastRecordingStep).not.toHaveProperty('extraNested');
+    expect(lastRecordingStep).not.toHaveProperty('constructor', 'evil');
+    expect(lastRecordingStep).not.toHaveProperty('toString', 'hacked');
+  });
+
+  it('rejects action with invalid type (not click/type/navigate)', async () => {
+    lastRecordingStep = null;
+
+    const result = await router.handleMessage(
+      {
+        type: 'RECORDING_ACTION',
+        action: {
+          action: 'exec' as any,
+          timestamp: Date.now(),
+          selector: '#x',
+        },
+      } as any,
+      { tab: { windowId: 1 } } as any,
+    );
+
+    // Returns ok but does NOT create a step
+    expect(result).toEqual({ ok: true });
+    expect(lastRecordingStep).toBeNull();
+    // Port should not receive any step
+    expect(recordingPortMock!.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects action with undefined type', async () => {
+    lastRecordingStep = null;
+
+    const result = await router.handleMessage(
+      {
+        type: 'RECORDING_ACTION',
+        action: { timestamp: Date.now(), selector: '#x' },
+      } as any,
+      {} as any,
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(lastRecordingStep).toBeNull();
+  });
+
+  it('passes through all known optional fields when present', async () => {
+    const fullAction = {
+      action: 'type' as const,
+      timestamp: 9999,
+      selector: 'input#name',
+      elementTag: 'input',
+      elementText: 'Name field',
+      elementAttributes: { id: 'name', type: 'text' },
+      elementRole: 'textbox',
+      a11ySubtree: { role: 'textbox', name: 'Name' },
+      typedText: 'Hello',
+      url: 'https://example.com',
+      pageTitle: 'Example',
+      viewportDimensions: { width: 1920, height: 1080 },
+      clickPositionHint: { x: 100, y: 200 },
+    };
+
+    await router.handleMessage(
+      { type: 'RECORDING_ACTION', action: fullAction } as any,
+      { tab: { windowId: 1 } } as any,
+    );
+
+    expect(lastRecordingStep).not.toBeNull();
+    expect(lastRecordingStep!.action).toBe('type');
+    expect(lastRecordingStep!.selector).toBe('input#name');
+    expect(lastRecordingStep!.elementTag).toBe('input');
+    expect(lastRecordingStep!.elementText).toBe('Name field');
+    expect(lastRecordingStep!.elementAttributes).toEqual({ id: 'name', type: 'text' });
+    expect(lastRecordingStep!.elementRole).toBe('textbox');
+    expect(lastRecordingStep!.a11ySubtree).toEqual({ role: 'textbox', name: 'Name' });
+    expect(lastRecordingStep!.typedText).toBe('Hello');
+    expect(lastRecordingStep!.url).toBe('https://example.com');
+    expect(lastRecordingStep!.pageTitle).toBe('Example');
+    expect(lastRecordingStep!.viewportDimensions).toEqual({ width: 1920, height: 1080 });
+    expect(lastRecordingStep!.clickPositionHint).toEqual({ x: 100, y: 200 });
+  });
+
+  it('forwards sanitized step via recording port', async () => {
+    await router.handleMessage(
+      {
+        type: 'RECORDING_ACTION',
+        action: { action: 'navigate' as const, timestamp: 1000, url: 'https://example.com' },
+      } as any,
+      { tab: { windowId: 1 } } as any,
+    );
+
+    expect(recordingPortMock!.postMessage).toHaveBeenCalledTimes(1);
+    const forwarded = recordingPortMock!.postMessage.mock.calls[0][0];
+    expect(forwarded.type).toBe('RECORDING_STEP');
+    expect(forwarded.step.action).toBe('navigate');
+    expect(forwarded.step.url).toBe('https://example.com');
+    // Should not contain any unknown fields
+    const knownKeys = new Set([
+      'id', 'recordingId', 'sequenceIndex', 'status', 'action',
+      'timestamp', 'selector', 'elementTag', 'elementText',
+      'elementAttributes', 'elementRole', 'a11ySubtree', 'typedText',
+      'url', 'pageTitle', 'viewportDimensions', 'clickPositionHint',
+      'screenshot', 'speechTranscript', 'description',
+    ]);
+    for (const key of Object.keys(forwarded.step)) {
+      expect(knownKeys.has(key)).toBe(true);
+    }
   });
 });
 
