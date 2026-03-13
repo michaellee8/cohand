@@ -14,6 +14,8 @@ interface WizardState {
   domains: string[];
   currentTabUrl: string | null;
   generatedScript: string | null;
+  /** Pre-filled script from recording flow — set by ChatPage before opening wizard. */
+  pendingScript: { source: string; description: string } | null;
   astValid: boolean;
   astErrors: string[];
   securityPassed: boolean;
@@ -26,6 +28,7 @@ interface WizardState {
   setDescription: (desc: string) => void;
   addDomain: (domain: string) => void;
   removeDomain: (domain: string) => void;
+  setPendingScript: (data: { source: string; description: string } | null) => void;
   detectCurrentTab: () => Promise<void>;
   startObservation: () => Promise<void>;
   runTest: () => Promise<void>;
@@ -53,6 +56,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   domains: [],
   currentTabUrl: null,
   generatedScript: null,
+  pendingScript: null,
   astValid: false,
   astErrors: [],
   securityPassed: false,
@@ -74,6 +78,8 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   removeDomain: (domain) => {
     set({ domains: get().domains.filter(d => d !== domain) });
   },
+
+  setPendingScript: (data) => set({ pendingScript: data }),
 
   detectCurrentTab: async () => {
     try {
@@ -213,6 +219,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
           schedule,
           activeScriptVersion: 1,
           disabled: false,
+          notifyEnabled: true,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         },
@@ -244,6 +251,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     domains: [],
     currentTabUrl: null,
     generatedScript: null,
+    pendingScript: null,
     astValid: false,
     astErrors: [],
     securityPassed: false,

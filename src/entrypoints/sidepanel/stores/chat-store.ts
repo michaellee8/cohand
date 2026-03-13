@@ -4,6 +4,7 @@ import { resolveModel, resolveApiKey, type ModelLike } from '../../../lib/pi-ai-
 import { getSettings } from '../../../lib/storage';
 import type { RecordingSession } from '../../../types/recording';
 import { buildRecordingGenerationMessages, parseGenerationOutput } from '../../../lib/recording/recording-prompts';
+import type { ExplorerStep } from '../components/ExplorerAgentFeedback';
 
 const WELCOME_MESSAGE = 'Welcome to Cohand! Describe what you want to automate, and I\'ll help you create a task.';
 
@@ -26,11 +27,20 @@ interface ChatState {
   generatedScript: string | null;
   generatedDescription: string | null;
 
+  /** Explorer agent progress steps shown in chat during task creation. */
+  explorerSteps: ExplorerStep[];
+
   initClient: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   cancelStream: () => void;
   clearChat: () => void;
   submitRecordingRefinement: (recording: RecordingSession, instructions: string) => Promise<void>;
+  /** Clear just the generated script/description (e.g., user clicks Discard). */
+  clearGeneratedScript: () => void;
+  /** Add an explorer agent progress step. */
+  addExplorerStep: (step: ExplorerStep) => void;
+  /** Clear explorer steps (e.g., when generation completes). */
+  clearExplorerSteps: () => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -47,6 +57,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   abortController: null,
   generatedScript: null,
   generatedDescription: null,
+  explorerSteps: [],
 
   initClient: async () => {
     try {
@@ -180,6 +191,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       apiKey: null,
       generatedScript: null,
       generatedDescription: null,
+      explorerSteps: [],
     });
   },
 
@@ -217,5 +229,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (err: unknown) {
       set({ error: err instanceof Error ? err.message : String(err), isStreaming: false });
     }
+  },
+
+  clearGeneratedScript: () => {
+    set({ generatedScript: null, generatedDescription: null });
+  },
+
+  addExplorerStep: (step: ExplorerStep) => {
+    set(state => ({ explorerSteps: [...state.explorerSteps, step] }));
+  },
+
+  clearExplorerSteps: () => {
+    set({ explorerSteps: [] });
   },
 }));
