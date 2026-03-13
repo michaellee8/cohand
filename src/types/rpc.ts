@@ -27,4 +27,5 @@ export type ScriptRPCErrorType =
   | 'DomainDisallowed'
   | 'SensitivePage'
   | 'ReadLimitExceeded'
+  | 'RateLimitExceeded'
   | 'Unknown';

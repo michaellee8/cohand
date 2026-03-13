@@ -88,17 +88,25 @@ export async function humanizedClick(
     clickCount: 1,
   });
 
-  // Random press duration
-  await delay(randomInt(rng, 50, 150));
-
-  // Mouse up
-  await cdp.send(tabId, 'Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: targetX,
-    y: targetY,
-    button: 'left',
-    clickCount: 1,
-  });
+  try {
+    // Random press duration
+    await delay(randomInt(rng, 50, 150));
+  } finally {
+    // Compensating mouseReleased — always sent even if an error occurs
+    // between mousePressed and mouseReleased to prevent stuck mouse state.
+    // Swallow errors in finally (tab may have been closed).
+    try {
+      await cdp.send(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: targetX,
+        y: targetY,
+        button: 'left',
+        clickCount: 1,
+      });
+    } catch {
+      // Tab may be closed — swallow to avoid masking the original error
+    }
+  }
 }
 
 /**

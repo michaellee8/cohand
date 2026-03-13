@@ -39,6 +39,10 @@ vi.mock('./humanize', () => ({
   humanizedMouseMove: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('./notifications', () => ({
+  deliverNotification: vi.fn().mockResolvedValue({ delivered: true }),
+}));
+
 // Import mocked modules so we can control their behavior
 import {
   resolveSelector,
@@ -82,6 +86,8 @@ function createContext(overrides?: Partial<HandlerContext>): HandlerContext {
     getAllowedDomains: vi.fn().mockResolvedValue(['example.com']),
     getTabUrl: vi.fn().mockResolvedValue('https://www.example.com/page'),
     getTabId: vi.fn().mockReturnValue(42),
+    db: {} as IDBDatabase,
+    getTask: vi.fn().mockResolvedValue({ name: 'Test Task', notifyEnabled: true }),
     ...overrides,
   };
 }
@@ -608,6 +614,7 @@ describe('registerPageMethods', () => {
     expect(result.value).toEqual({
       queued: true,
       message: 'Task complete!',
+      reason: undefined,
     });
   });
 
@@ -622,6 +629,7 @@ describe('registerPageMethods', () => {
     expect(result.value).toEqual({
       queued: true,
       message: 'Still works',
+      reason: undefined,
     });
   });
 

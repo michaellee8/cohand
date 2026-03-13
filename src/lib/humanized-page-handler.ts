@@ -377,16 +377,22 @@ export function registerPageMethods(
       const timeout = 10000; // 10 seconds max
       const start = Date.now();
 
-      // Poll page load state via CDP
+      // Poll document.readyState via CDP Runtime.evaluate
       while (Date.now() - start < timeout) {
         try {
-          const metrics = (await ctx.cdp.send(tabId, 'Page.getLayoutMetrics')) as Record<string, unknown>;
-          if (metrics) return undefined; // Page is responsive
+          const result = (await ctx.cdp.send(tabId, 'Runtime.evaluate', {
+            expression: 'document.readyState',
+          })) as { result?: { value?: string } } | undefined;
+          const readyState = result?.result?.value;
+          if (readyState === 'complete' || readyState === 'interactive') {
+            return undefined;
+          }
         } catch {
-          // Page still loading — wait and retry
+          // Page still loading or not available — wait and retry
         }
         await new Promise(r => setTimeout(r, 200));
       }
+      // Timed out — return without error (best-effort)
       return undefined;
     }),
   );

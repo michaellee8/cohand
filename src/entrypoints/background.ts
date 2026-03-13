@@ -122,7 +122,7 @@ export default defineBackground(() => {
       await offscreenMutex;
       return;
     }
-    offscreenMutex = (async () => {
+    const promise = (async () => {
       try {
         const existingContexts = await chrome.runtime.getContexts({
           contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
@@ -135,11 +135,13 @@ export default defineBackground(() => {
           });
         }
       } catch (err) {
+        // Reset mutex on failure so next call can retry
+        offscreenMutex = null;
         console.error('[Cohand] Failed to create offscreen document:', err);
       }
     })();
-    await offscreenMutex;
-    offscreenMutex = null;
+    offscreenMutex = promise;
+    await promise;
   }
 
   // ---------------------------------------------------------------------------
@@ -171,6 +173,11 @@ export default defineBackground(() => {
         },
         getTabUrl,
         getTabId: (taskId: string) => taskTabMap.get(taskId),
+        db,
+        getTask: async (taskId: string) => {
+          const task = await getTask(db, taskId);
+          return task ? { name: task.name, notifyEnabled: task.notifyEnabled } : undefined;
+        },
       };
       registerPageMethods(rpcHandler, handlerCtx);
 
