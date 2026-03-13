@@ -98,7 +98,11 @@ function buildCssSelector(el: Element): string {
 
   // aria-label
   const ariaLabel = el.getAttribute('aria-label');
-  if (ariaLabel) return `${el.tagName.toLowerCase()}[aria-label="${CSS.escape(ariaLabel)}"]`;
+  if (ariaLabel) {
+    // Use single quotes to avoid issues with double quotes in aria-label values
+    const escaped = CSS.escape(ariaLabel).replace(/'/g, "\\'");
+    return `${el.tagName.toLowerCase()}[aria-label='${escaped}']`;
+  }
 
   // tag.class1.class2
   const tag = el.tagName.toLowerCase();

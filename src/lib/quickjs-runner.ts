@@ -5,7 +5,7 @@ import {
   type QuickJSAsyncContext,
   type QuickJSHandle,
 } from 'quickjs-emscripten';
-import { QUICKJS_MEMORY_LIMIT } from '../constants';
+import { QUICKJS_MEMORY_LIMIT, QUICKJS_TIMEOUT_MS } from '../constants';
 
 /**
  * Callback that bridges from QuickJS to the host environment.
@@ -218,10 +218,16 @@ export async function createQuickJSExecutor(
     // Use the provided module (from pool) or create a fresh one
     wasmModule = wasmModuleOverride ?? await newQuickJSAsyncWASMModule();
 
-    // Create runtime with memory limits
+    // Create runtime with memory and CPU limits
     runtime = wasmModule.newRuntime();
     runtime.setMemoryLimit(QUICKJS_MEMORY_LIMIT);
     runtime.setMaxStackSize(1024 * 1024); // 1MB stack
+
+    // CPU interrupt handler: abort execution after QUICKJS_TIMEOUT_MS (5 min)
+    const startTime = Date.now();
+    runtime.setInterruptHandler(() => {
+      return Date.now() - startTime > QUICKJS_TIMEOUT_MS;
+    });
 
     // Create async context
     ctx = runtime.newContext();

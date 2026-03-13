@@ -126,6 +126,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     schedule: { type: 'manual' },
     activeScriptVersion: 1,
     disabled: false,
+    notifyEnabled: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,

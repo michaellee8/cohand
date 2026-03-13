@@ -248,6 +248,7 @@ export function ChatPage({ onOpenSettings }: ChatPageProps) {
             placeholder={recordingJustCompleted && !hasSubmittedRefinement
               ? "Describe what you want this workflow to do..."
               : "Describe your task..."}
+            aria-label="Chat message input"
             className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             disabled={isStreaming || isRecording}
           />
@@ -256,6 +257,7 @@ export function ChatPage({ onOpenSettings }: ChatPageProps) {
             disabled={isRecording || isStreaming}
             className="text-gray-400 hover:text-red-500 p-2 rounded-lg transition-colors disabled:opacity-30"
             title="Record workflow"
+            aria-label="Record workflow"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
               <circle cx="12" cy="12" r="8" />

@@ -52,6 +52,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     schedule: { type: 'interval', intervalMinutes: 30 },
     activeScriptVersion: 1,
     disabled: false,
+    notifyEnabled: true,
     createdAt: '2026-03-07T00:00:00Z',
     updatedAt: '2026-03-07T00:00:00Z',
     ...overrides,

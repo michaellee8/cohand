@@ -16,14 +16,16 @@ export default defineConfig({
     {
       name: 'core',
       testMatch: /smoke|task|wizard|chat|extension/,
+      testIgnore: /-live/,
     },
     {
       name: 'features',
       testMatch: /recording|schedule|settings|notifications|export-import|security/,
+      testIgnore: /-live/,
     },
     {
       name: 'live',
-      testMatch: /codex.*live/,
+      testMatch: /-live/,
     },
   ],
 

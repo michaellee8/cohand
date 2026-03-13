@@ -41,6 +41,7 @@ const mockRuntime = {
   }),
   setMemoryLimit: vi.fn(),
   setMaxStackSize: vi.fn(),
+  setInterruptHandler: vi.fn(),
   dispose: vi.fn(() => { mockRuntime.alive = false; }),
 };
 

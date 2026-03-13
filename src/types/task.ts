@@ -7,6 +7,7 @@ export interface Task {
   activeScriptVersion: number;
   lastKnownGoodVersion?: number;
   disabled: boolean;
+  notifyEnabled?: boolean;
   createdAt: string; // ISO-8601
   updatedAt: string;
 }

@@ -122,26 +122,31 @@ export default defineBackground(() => {
       await offscreenMutex;
       return;
     }
-    const promise = (async () => {
-      try {
-        const existingContexts = await chrome.runtime.getContexts({
-          contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+    // Assign mutex BEFORE starting async work to prevent race
+    let resolve: () => void;
+    let reject: (err: unknown) => void;
+    offscreenMutex = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
+
+    try {
+      const existingContexts = await chrome.runtime.getContexts({
+        contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+      });
+      if (existingContexts.length === 0) {
+        await chrome.offscreen.createDocument({
+          url: 'offscreen.html',
+          reasons: [chrome.offscreen.Reason.WORKERS],
+          justification: 'QuickJS WASM sandbox for script execution',
         });
-        if (existingContexts.length === 0) {
-          await chrome.offscreen.createDocument({
-            url: 'offscreen.html',
-            reasons: [chrome.offscreen.Reason.WORKERS],
-            justification: 'QuickJS WASM sandbox for script execution',
-          });
-        }
-      } catch (err) {
-        // Reset mutex on failure so next call can retry
-        offscreenMutex = null;
-        console.error('[Cohand] Failed to create offscreen document:', err);
       }
-    })();
-    offscreenMutex = promise;
-    await promise;
+      resolve!();
+      // Clear mutex after success so future calls re-validate
+      // (offscreen doc may be silently closed by Chrome on idle)
+      offscreenMutex = null;
+    } catch (err) {
+      offscreenMutex = null;
+      console.error('[Cohand] Failed to create offscreen document:', err);
+      reject!(err);
+    }
   }
 
   // ---------------------------------------------------------------------------

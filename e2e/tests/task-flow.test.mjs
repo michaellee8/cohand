@@ -91,6 +91,7 @@ async function createTaskViaServiceWorker(page, { id, name, description, domains
             schedule: task.schedule || { type: 'manual' },
             activeScriptVersion: 1,
             disabled: false,
+            notifyEnabled: true,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           },

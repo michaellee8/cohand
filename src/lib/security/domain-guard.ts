@@ -5,6 +5,27 @@
  * domain validation before reaching chrome.debugger.sendCommand().
  */
 
+import { NAVIGATOR_PERMISSION_EXPIRY_DAYS } from '../../constants';
+import type { DomainPermission } from '../../types';
+
+/**
+ * Check if a domain permission has expired.
+ * A permission expires after NAVIGATOR_PERMISSION_EXPIRY_DAYS (30 days) from grantedAt.
+ */
+export function isPermissionExpired(permission: DomainPermission): boolean {
+  const grantedAt = new Date(permission.grantedAt).getTime();
+  if (isNaN(grantedAt)) return true; // Invalid date = treat as expired
+  const expiryMs = NAVIGATOR_PERMISSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+  return Date.now() > grantedAt + expiryMs;
+}
+
+/**
+ * Filter a list of domain permissions, returning only those that have not expired.
+ */
+export function getValidDomainPermissions(permissions: DomainPermission[]): DomainPermission[] {
+  return permissions.filter(p => !isPermissionExpired(p));
+}
+
 /**
  * Check if a URL's hostname matches the allowed domains list.
  * Supports exact match and subdomain matching.

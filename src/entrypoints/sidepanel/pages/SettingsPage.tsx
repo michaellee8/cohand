@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSettingsStore } from '../stores/settings-store';
+import { UsageStats } from '../components/UsageStats';
+import {
+  exportTask,
+  downloadBundle,
+  validateImport,
+  prepareForImport,
+  type TaskExportBundle,
+} from '../../../lib/export-import';
+import type { Task, ScriptVersion, TaskState } from '../../../types';
 
 interface SettingsPageProps {
   onBack: () => void;
@@ -7,7 +16,7 @@ interface SettingsPageProps {
 
 export function SettingsPage({ onBack }: SettingsPageProps) {
   const {
-    settings, domainPermissions, hasApiKey, loading, saving,
+    settings, domainPermissions, hasApiKey, loading, saving, error: storeError,
     codexConnected, codexAccountId,
     updateSettings, saveApiKey, clearApiKey, addDomain, removeDomain,
     startCodexLogin, logoutCodex, importCodexAuth,
@@ -19,7 +28,11 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
   const [showPasteJson, setShowPasteJson] = useState(false);
   const [pasteJsonInput, setPasteJsonInput] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [taskImportError, setTaskImportError] = useState<string | null>(null);
+  const [taskImportSuccess, setTaskImportSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const taskImportRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { useSettingsStore.getState().load(); }, []);
 
@@ -48,10 +61,74 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
   const needsApiKey = settings.llmProvider !== 'chatgpt-subscription';
   const needsBaseUrl = settings.llmProvider === 'custom';
 
+  const handleExportTasks = async () => {
+    setExportStatus(null);
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_TASKS' });
+      const tasks: Task[] = response.tasks || [];
+      if (tasks.length === 0) {
+        setExportStatus('No tasks to export.');
+        return;
+      }
+      let exportedCount = 0;
+      for (const task of tasks) {
+        const versionsResp = await chrome.runtime.sendMessage({ type: 'GET_SCRIPT_VERSIONS', taskId: task.id });
+        const scripts: ScriptVersion[] = versionsResp.versions || [];
+        const stateResp = await chrome.runtime.sendMessage({ type: 'GET_TASK_STATE', taskId: task.id });
+        const state: TaskState | undefined = stateResp.state;
+        const bundle = exportTask(task, scripts, state, false);
+        downloadBundle(bundle);
+        exportedCount++;
+      }
+      setExportStatus(`Exported ${exportedCount} task${exportedCount !== 1 ? 's' : ''}.`);
+    } catch (err: unknown) {
+      setExportStatus(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const handleImportTask = async (file: File) => {
+    setTaskImportError(null);
+    setTaskImportSuccess(null);
+    try {
+      const json = await file.text();
+
+      // Validate
+      const validation = await validateImport(json);
+      if (!validation.valid) {
+        setTaskImportError(`Validation failed: ${validation.errors.join('; ')}`);
+        return;
+      }
+
+      // Prepare (reset IDs, security flags)
+      const rawBundle: TaskExportBundle = JSON.parse(json);
+      const prepared = prepareForImport(rawBundle);
+
+      // Save task via service worker
+      const latestScript = prepared.scripts.length > 0
+        ? prepared.scripts[prepared.scripts.length - 1]
+        : null;
+
+      await chrome.runtime.sendMessage({
+        type: 'CREATE_TASK',
+        task: prepared.task,
+        scriptSource: latestScript?.source,
+        astValidationPassed: latestScript?.astValidationPassed ?? false,
+        securityReviewPassed: false, // Always require re-review for imports
+      });
+
+      const warnings = validation.warnings.length > 0
+        ? ` Warnings: ${validation.warnings.join('; ')}`
+        : '';
+      setTaskImportSuccess(`Imported "${prepared.task.name}" successfully.${warnings}`);
+    } catch (err: unknown) {
+      setTaskImportError(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   return (
     <div className="h-screen bg-white text-gray-900 flex flex-col">
       <div className="flex items-center px-3 py-2.5 border-b border-gray-200">
-        <button className="p-1 text-gray-500 hover:text-gray-700" onClick={onBack}>
+        <button className="p-1 text-gray-500 hover:text-gray-700" onClick={onBack} aria-label="Back to previous page">
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
           </svg>
@@ -60,6 +137,11 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
         {saving && <span className="ml-auto text-xs text-gray-400">Saving...</span>}
       </div>
 
+      {storeError && (
+        <div className="mx-4 mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+          {storeError}
+        </div>
+      )}
       <main className="flex-1 overflow-y-auto p-4 space-y-6">
         {/* LLM Provider */}
         <section>
@@ -275,6 +357,57 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
               Add
             </button>
           </div>
+        </section>
+
+        {/* Export / Import Tasks */}
+        <section>
+          <h2 className="text-sm font-semibold text-gray-700 mb-2">Export / Import Tasks</h2>
+          <div className="space-y-2">
+            <button
+              onClick={handleExportTasks}
+              className="w-full bg-gray-100 text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-200 transition-colors"
+            >
+              Export All Tasks
+            </button>
+            {exportStatus && (
+              <p className="text-xs text-gray-500">{exportStatus}</p>
+            )}
+
+            <input
+              ref={taskImportRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                await handleImportTask(file);
+                e.target.value = '';
+              }}
+            />
+            <button
+              onClick={() => taskImportRef.current?.click()}
+              className="w-full bg-gray-100 text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-200 transition-colors"
+            >
+              Import Task
+            </button>
+            {taskImportError && (
+              <div className="px-3 py-2 bg-red-50 text-red-600 text-xs rounded-lg">
+                {taskImportError}
+              </div>
+            )}
+            {taskImportSuccess && (
+              <div className="px-3 py-2 bg-green-50 text-green-600 text-xs rounded-lg">
+                {taskImportSuccess}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* LLM Usage Stats */}
+        <section>
+          <h2 className="text-sm font-semibold text-gray-700 mb-2">LLM Usage (Last 30 Days)</h2>
+          <UsageStats />
         </section>
 
         {/* YOLO Mode */}

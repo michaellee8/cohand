@@ -14,6 +14,14 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SandboxBridge, type ExecuteScriptResult } from './sandbox-bridge';
+
+// Mock keepalive to prevent setInterval from running
+vi.mock('./keepalive', () => ({
+  startKeepalive: vi.fn(),
+  stopKeepalive: vi.fn(),
+  isKeepaliveActive: vi.fn().mockReturnValue(false),
+}));
+
 import { RPCHandler } from './rpc-handler';
 
 // ---------------------------------------------------------------------------
@@ -60,6 +68,9 @@ describe('RPCHandler method dispatch', () => {
       onMessage: {
         addListener: vi.fn(),
       },
+      onDisconnect: {
+        addListener: vi.fn(),
+      },
       postMessage: vi.fn(),
     };
 
@@ -90,6 +101,7 @@ describe('RPCHandler method dispatch', () => {
     const mockPort = {
       name: 'script-rpc',
       onMessage: { addListener: vi.fn() },
+      onDisconnect: { addListener: vi.fn() },
       postMessage: vi.fn(),
     };
 
@@ -119,6 +131,7 @@ describe('RPCHandler method dispatch', () => {
     const mockPort = {
       name: 'script-rpc',
       onMessage: { addListener: vi.fn() },
+      onDisconnect: { addListener: vi.fn() },
       postMessage: vi.fn(),
     };
 

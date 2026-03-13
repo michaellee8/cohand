@@ -15,8 +15,11 @@ export function NotificationFeed({ notifications, onMarkRead }: NotificationFeed
       {notifications.map(notif => (
         <div
           key={notif.id}
-          className={`p-2 rounded text-xs ${notif.isRead ? 'bg-white' : 'bg-blue-50'}`}
+          className={`p-2 rounded text-xs transition-colors ${notif.isRead ? 'bg-white' : 'bg-blue-50 cursor-pointer hover:bg-blue-100'}`}
           onClick={() => !notif.isRead && onMarkRead(notif.id)}
+          role={notif.isRead ? undefined : 'button'}
+          tabIndex={notif.isRead ? undefined : 0}
+          onKeyDown={(e) => { if (!notif.isRead && e.key === 'Enter') onMarkRead(notif.id); }}
         >
           <p className={notif.isRead ? 'text-gray-500' : 'text-gray-700'}>{notif.message}</p>
           <span className="text-gray-400 text-[10px]">

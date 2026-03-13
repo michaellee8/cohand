@@ -15,7 +15,13 @@ export async function deliverNotification(
   taskName: string,
   message: string,
   db: IDBDatabase,
+  options?: { notifyEnabled?: boolean },
 ): Promise<{ delivered: boolean; reason?: string }> {
+  // 0. Check per-task notification toggle (defaults to true if not specified)
+  if (options?.notifyEnabled === false) {
+    return { delivered: false, reason: 'Notifications disabled for this task' };
+  }
+
   // 1. Scan message
   const scanResult = scanNotification(message);
   if (!scanResult.safe) {

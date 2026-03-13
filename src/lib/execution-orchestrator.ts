@@ -10,7 +10,10 @@ import {
 } from './db-helpers';
 import { resetCumulativeReads } from './humanized-page-handler';
 import { validateAST } from './security/ast-validator';
-import type { ScriptRun } from '../types';
+import { scanReturnValue, scanState } from './security/injection-scanner';
+import { runSelfHealingLoop } from './self-healing';
+import type { ScriptRun, ScriptVersion } from '../types';
+import type { ModelLike } from './pi-ai-bridge';
 import type { CDPManager } from './cdp';
 
 // ---------------------------------------------------------------------------
@@ -27,6 +30,14 @@ export interface ExecutionContext {
   ensureOffscreen: () => Promise<void>;
   /** Optional callback invoked when taskTabMap is mutated, for write-through persistence. */
   onTaskTabMapChange?: () => void;
+  /** Optional LLM model for self-healing repair. */
+  repairModel?: ModelLike;
+  /** Optional API key for self-healing LLM calls. */
+  repairApiKey?: string;
+  /** Optional pair of models for security review during self-healing. */
+  securityModels?: [ModelLike, ModelLike];
+  /** Optional a11y tree provider for self-healing repair context. */
+  getA11yTree?: (tabId: number) => Promise<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +109,11 @@ export async function executeTaskAsync(
       throw new Error(`Script failed AST validation: ${validation.errors.join(', ')}`);
     }
 
+    // Enforce security review gate — script must have passed dual-model review
+    if (!activeVersion.securityReviewPassed) {
+      throw new Error(`Script version ${activeVersion.version} has not passed security review`);
+    }
+
     // Get current state
     const taskState = await getTaskState(db, taskId);
     const currentState = taskState?.state ?? {};
@@ -112,7 +128,7 @@ export async function executeTaskAsync(
       // Send execution request to offscreen document.
       // Flow: service worker -> offscreen doc -> sandbox iframe -> script runs
       // RPCs flow back: sandbox -> offscreen -> service worker RPC port -> CDP
-      const execResponse = await chrome.runtime.sendMessage({
+      let execResponse = await chrome.runtime.sendMessage({
         type: 'SANDBOX_EXECUTE',
         taskId,
         source: activeVersion.source,
@@ -124,7 +140,29 @@ export async function executeTaskAsync(
         throw new Error('Execution cancelled');
       }
 
-      // Record successful run
+      // Scan return value before storing (Layer 5 — output scanning)
+      if (execResponse?.ok && execResponse.result !== undefined) {
+        const resultScan = scanReturnValue(execResponse.result);
+        if (!resultScan.safe) {
+          execResponse = {
+            ok: false,
+            error: `Output scan blocked: ${resultScan.flags.join(', ')}`,
+          };
+        }
+      }
+
+      // Scan state before persistence (Layer 5 — output scanning)
+      if (execResponse?.ok && execResponse.state) {
+        const stateScan = scanState(execResponse.state);
+        if (!stateScan.safe) {
+          execResponse = {
+            ok: false,
+            error: `State scan blocked: ${stateScan.flags.join(', ')}`,
+          };
+        }
+      }
+
+      // Record run
       runRecord = {
         id: `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         taskId,
@@ -187,6 +225,71 @@ export async function executeTaskAsync(
         await capRuns(db, taskId);
       } catch (err) {
         console.error(`[Cohand] Failed to save run record for ${taskId}:`, err);
+      }
+
+      // --- Self-healing on failure ---
+      if (!runRecord.success && runRecord.version > 0) {
+        try {
+          const task = await getTask(db, taskId);
+          if (task && !task.disabled) {
+            const a11yTree = ctx.getA11yTree
+              ? await ctx.getA11yTree(tabId)
+              : undefined;
+
+            await runSelfHealingLoop({
+              task,
+              failedVersion: runRecord.version,
+              error: runRecord.error ?? 'Unknown error',
+              tabId,
+              db,
+              executeVersion: async (version: ScriptVersion) => {
+                try {
+                  await cdp.attach(tabId);
+                  const resp = await chrome.runtime.sendMessage({
+                    type: 'SANDBOX_EXECUTE',
+                    taskId,
+                    source: version.source,
+                    state: {},
+                    tabId,
+                  });
+                  await cdp.detach(tabId);
+
+                  // Apply output scanning (Layer 5) to self-healing executions too
+                  if (resp?.ok) {
+                    const resultScan = scanReturnValue(resp.result);
+                    if (!resultScan.safe) {
+                      return { success: false, error: `Return value blocked: ${resultScan.flags.join(', ')}` };
+                    }
+                    if (resp.state) {
+                      const stateScan = scanState(resp.state);
+                      if (!stateScan.safe) {
+                        return { success: false, error: `State blocked: ${stateScan.flags.join(', ')}` };
+                      }
+                    }
+                  }
+
+                  return {
+                    success: resp?.ok ?? false,
+                    result: resp?.result,
+                    error: resp?.ok ? undefined : resp?.error,
+                  };
+                } catch (execErr) {
+                  try { await cdp.detach(tabId); } catch { /* ignore */ }
+                  return {
+                    success: false,
+                    error: execErr instanceof Error ? execErr.message : String(execErr),
+                  };
+                }
+              },
+              model: ctx.repairModel,
+              apiKey: ctx.repairApiKey,
+              securityModels: ctx.securityModels,
+              a11yTree,
+            });
+          }
+        } catch (healErr) {
+          console.error(`[Cohand] Self-healing failed for ${taskId}:`, healErr);
+        }
       }
     }
   }

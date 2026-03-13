@@ -137,6 +137,17 @@ export const getScriptVersion = (db: IDBDatabase, id: string) =>
 export const getScriptVersionsForTask = (db: IDBDatabase, taskId: string) =>
   getAllByIndex<ScriptVersion>(db, 'script_versions', 'by_task', taskId);
 
+/** Get the latest (highest version number) script version for a task. */
+export async function getLatestVersion(
+  db: IDBDatabase,
+  taskId: string,
+): Promise<ScriptVersion | undefined> {
+  const versions = await getScriptVersionsForTask(db, taskId);
+  if (versions.length === 0) return undefined;
+  versions.sort((a, b) => b.version - a.version);
+  return versions[0];
+}
+
 /** Cap script versions per task – keeps the newest MAX_SCRIPT_VERSIONS. */
 export async function capScriptVersions(
   db: IDBDatabase,

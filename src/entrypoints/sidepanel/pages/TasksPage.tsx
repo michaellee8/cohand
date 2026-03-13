@@ -12,8 +12,8 @@ interface TasksPageProps {
 }
 
 export function TasksPage({ onOpenSettings }: TasksPageProps) {
-  const { tasks, selectedTaskId, runs, notifications, loading,
-    fetchTasks, selectTask, runTask, deleteTask, markNotificationRead } = useTasksStore();
+  const { tasks, selectedTaskId, runs, scriptVersions, taskStates, notifications, loading, runningTaskId,
+    fetchTasks, selectTask, runTask, deleteTask, updateTask, markNotificationRead } = useTasksStore();
   const { settings, hasApiKey, codexConnected } = useSettingsStore();
   const [showWizard, setShowWizard] = useState(false);
   const resetWizard = useWizardStore(state => state.reset);
@@ -46,13 +46,26 @@ export function TasksPage({ onOpenSettings }: TasksPageProps) {
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
 
+  const handleRevertVersion = async (taskId: string, version: number) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    const updated = { ...task, activeScriptVersion: version, updatedAt: new Date().toISOString() };
+    await updateTask(updated);
+    // Refresh versions after revert
+    useTasksStore.getState().fetchScriptVersions(taskId);
+  };
+
   if (selectedTask) {
     return (
       <TaskDetail
         task={selectedTask}
         runs={runs[selectedTask.id] || []}
+        scriptVersions={scriptVersions[selectedTask.id] || []}
+        taskState={taskStates[selectedTask.id]}
         onClose={() => selectTask(null)}
         onDelete={deleteTask}
+        onRevertVersion={handleRevertVersion}
+        onUpdateTask={updateTask}
       />
     );
   }
@@ -89,15 +102,21 @@ export function TasksPage({ onOpenSettings }: TasksPageProps) {
         </div>
       ) : (
         <div className="px-4 space-y-2 overflow-y-auto flex-1">
-          {tasks.map(task => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              isSelected={task.id === selectedTaskId}
-              onSelect={selectTask}
-              onRun={runTask}
-            />
-          ))}
+          {tasks.map(task => {
+            const taskRuns = runs[task.id] || [];
+            const lastRun = taskRuns.length > 0 ? taskRuns[0] : undefined;
+            return (
+              <TaskCard
+                key={task.id}
+                task={task}
+                isSelected={task.id === selectedTaskId}
+                lastRun={lastRun}
+                isRunning={runningTaskId === task.id}
+                onSelect={selectTask}
+                onRun={runTask}
+              />
+            );
+          })}
         </div>
       )}
 

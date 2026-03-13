@@ -628,6 +628,7 @@ test.describe('Security: Task execution safety @features', () => {
               schedule: { type: 'manual' },
               activeScriptVersion: 1,
               disabled: false,
+              notifyEnabled: true,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             },

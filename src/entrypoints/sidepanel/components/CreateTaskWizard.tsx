@@ -99,7 +99,7 @@ export function CreateTaskWizard({ onComplete, onCancel }: CreateTaskWizardProps
           Cancel
         </button>
         <div className="flex gap-2">
-          {currentIdx > 0 && store.step !== 'observe' && (
+          {currentIdx > 0 && (
             <button
               onClick={store.prevStep}
               disabled={store.loading}

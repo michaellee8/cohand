@@ -23,6 +23,9 @@ export default defineConfig({
     sandbox: {
       pages: ['sandbox.html'],
     },
+    storage: {
+      access_level: 'TRUSTED_CONTEXTS',
+    },
 web_accessible_resources: [{
       resources: ['oauth-callback.html'],
       matches: ['http://localhost/*'],
