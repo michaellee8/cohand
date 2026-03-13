@@ -199,6 +199,8 @@ function hostValueToHandle(ctx: QuickJSAsyncContext, value: unknown): QuickJSHan
  * @param taskId - Task ID for routing RPC calls
  * @param state - Initial state object passed to the script
  * @param rpcCallback - Host function for forwarding page actions
+ * @param wasmModuleOverride - Optional pre-created WASM module (from pool).
+ *   When provided the caller is responsible for lifecycle (do not dispose).
  * @returns Execution result with ok/error status
  */
 export async function createQuickJSExecutor(
@@ -206,14 +208,15 @@ export async function createQuickJSExecutor(
   taskId: string,
   state: Record<string, unknown>,
   rpcCallback: RPCCallback,
+  wasmModuleOverride?: QuickJSAsyncWASMModule,
 ): Promise<QuickJSExecutionResult> {
   let wasmModule: QuickJSAsyncWASMModule | undefined;
   let runtime: QuickJSAsyncRuntime | undefined;
   let ctx: QuickJSAsyncContext | undefined;
 
   try {
-    // Create a fresh WASM module (in production, use the pool)
-    wasmModule = await newQuickJSAsyncWASMModule();
+    // Use the provided module (from pool) or create a fresh one
+    wasmModule = wasmModuleOverride ?? await newQuickJSAsyncWASMModule();
 
     // Create runtime with memory limits
     runtime = wasmModule.newRuntime();
@@ -222,6 +225,29 @@ export async function createQuickJSExecutor(
 
     // Create async context
     ctx = runtime.newContext();
+
+    // Strip dangerous globals from the QuickJS context (Layer 4 hardening)
+    // This removes constructors that could be used to escape the sandbox.
+    const dangerousGlobals = ['eval', 'Function', 'Proxy', 'Reflect'];
+    for (const name of dangerousGlobals) {
+      ctx.setProp(ctx.global, name, ctx.undefined);
+    }
+
+    // Strip AsyncFunction, GeneratorFunction, AsyncGeneratorFunction constructors
+    // by evaluating cleanup code inside the sandbox itself
+    const hardeningScript = `
+      (function() {
+        try { var AF = (async function(){}).constructor; delete AF.constructor; } catch(e) {}
+        try { var GF = (function*(){}).constructor; delete GF.constructor; } catch(e) {}
+        try { var AGF = (async function*(){}).constructor; delete AGF.constructor; } catch(e) {}
+      })();
+    `;
+    const hardenResult = ctx.evalCode(hardeningScript, 'hardening.js');
+    if ('value' in hardenResult && hardenResult.value) {
+      hardenResult.value.dispose();
+    } else if ('error' in hardenResult && hardenResult.error) {
+      hardenResult.error.dispose();
+    }
 
     // Inject __stateJson as a global string
     const stateJsonHandle = ctx.newString(JSON.stringify(state));

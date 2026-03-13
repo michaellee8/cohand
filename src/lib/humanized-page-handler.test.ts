@@ -9,9 +9,17 @@ import {
   registerPageMethods,
   resetCumulativeReads,
   getCumulativeReads,
+  resetNavigationTimestamps,
 } from './humanized-page-handler';
 
 // ---- Mocks ----
+
+// Mock keepalive to prevent setInterval from running with fake timers
+vi.mock('./keepalive', () => ({
+  startKeepalive: vi.fn(),
+  stopKeepalive: vi.fn(),
+  isKeepaliveActive: vi.fn().mockReturnValue(false),
+}));
 
 vi.mock('./selector-resolver', () => ({
   resolveSelector: vi.fn(),
@@ -155,6 +163,7 @@ describe('registerPageMethods', () => {
 
   afterEach(() => {
     resetCumulativeReads('task-1');
+    resetNavigationTimestamps('task-1');
   });
 
   // ---- goto ----
@@ -677,5 +686,75 @@ describe('registerPageMethods', () => {
     expect(mockedHumanizedClick).toHaveBeenCalledTimes(1);
     expect(mockedHumanizedType).toHaveBeenCalledTimes(1);
     expect(mockedHumanizedType.mock.calls[0][3]).toBe('hello world');
+  });
+
+  // ---- navigator rate limit (Task 6) ----
+
+  describe('navigation rate limit', () => {
+    it('allows up to 5 navigations within 60 seconds', async () => {
+      resetNavigationTimestamps('task-1');
+
+      for (let i = 0; i < 5; i++) {
+        const rpc = makeRPC('goto', { args: ['https://www.example.com/page' + i] }, { id: i + 1 });
+        const result = await invokeRPC(handler, rpc);
+        expect(result.ok).toBe(true);
+      }
+    });
+
+    it('rejects the 6th navigation within 60 seconds', async () => {
+      resetNavigationTimestamps('task-1');
+
+      // Perform 5 successful navigations
+      for (let i = 0; i < 5; i++) {
+        const rpc = makeRPC('goto', { args: ['https://www.example.com/page' + i] }, { id: i + 1 });
+        const result = await invokeRPC(handler, rpc);
+        expect(result.ok).toBe(true);
+      }
+
+      // 6th should be rejected
+      const rpc = makeRPC('goto', { args: ['https://www.example.com/too-many'] }, { id: 100 });
+      const result = await invokeRPC(handler, rpc);
+
+      expect(result.ok).toBe(false);
+      expect(result.error?.type).toBe('RateLimitExceeded');
+      expect(result.error?.message).toContain('navigation rate limit');
+    });
+
+    it('allows navigation after the 60-second window passes', async () => {
+      resetNavigationTimestamps('task-1');
+
+      // Perform 5 navigations
+      for (let i = 0; i < 5; i++) {
+        const rpc = makeRPC('goto', { args: ['https://www.example.com/page' + i] }, { id: i + 1 });
+        await invokeRPC(handler, rpc);
+      }
+
+      // Advance time past the 60-second window
+      vi.advanceTimersByTime(61_000);
+
+      // Now the 6th should succeed because the old timestamps expired
+      const rpc = makeRPC('goto', { args: ['https://www.example.com/ok-again'] }, { id: 200 });
+      const result = await invokeRPC(handler, rpc);
+      expect(result.ok).toBe(true);
+    });
+
+    it('rate limits are per-task', async () => {
+      resetNavigationTimestamps('task-1');
+      resetNavigationTimestamps('task-2');
+
+      // Fill up task-1's limit
+      for (let i = 0; i < 5; i++) {
+        const rpc = makeRPC('goto', { args: ['https://www.example.com/p' + i] }, { id: i + 1, taskId: 'task-1' });
+        await invokeRPC(handler, rpc);
+      }
+
+      // task-2 should still be allowed
+      const rpc = makeRPC('goto', { args: ['https://www.example.com/other'] }, { id: 50, taskId: 'task-2' });
+      const result = await invokeRPC(handler, rpc);
+      expect(result.ok).toBe(true);
+
+      // Clean up task-2
+      resetNavigationTimestamps('task-2');
+    });
   });
 });

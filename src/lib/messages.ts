@@ -40,7 +40,13 @@ export type Message =
   | { type: 'OAUTH_CALLBACK'; code: string; state: string }
   | { type: 'START_CODEX_OAUTH' }
   | { type: 'LOGOUT_CODEX' }
-  | { type: 'DELETE_RECORDING_STEP'; stepId: string };
+  | { type: 'DELETE_RECORDING_STEP'; stepId: string }
+  | { type: 'KEYSTROKE_UPDATE'; text: string; element: { selector: string; tag: string; name?: string }; isFinal: boolean }
+  // Script versions & task state (sidepanel reads)
+  | { type: 'GET_SCRIPT_VERSIONS'; taskId: string }
+  | { type: 'GET_TASK_STATE'; taskId: string }
+  // Arbitrary CDP command passthrough (used by Remote mode)
+  | { type: 'CDP_COMMAND'; tabId: number; method: string; params?: Record<string, unknown> };
 
 // Response type mapping
 export type MessageResponse = {
@@ -71,6 +77,10 @@ export type MessageResponse = {
   START_CODEX_OAUTH: { ok: true };
   LOGOUT_CODEX: { ok: true };
   DELETE_RECORDING_STEP: { ok: true };
+  KEYSTROKE_UPDATE: { ok: true };
+  GET_SCRIPT_VERSIONS: { versions: import('../types/script').ScriptVersion[] };
+  GET_TASK_STATE: { state: import('../types/state').TaskState | undefined };
+  CDP_COMMAND: { ok: boolean; result?: unknown; error?: string };
 };
 
 // Content script → Service worker (events from recording overlay)

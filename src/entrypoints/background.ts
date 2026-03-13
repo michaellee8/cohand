@@ -208,6 +208,42 @@ export default defineBackground(() => {
       // Clean up any stale OAuth state from interrupted flows
       await cleanupStaleOAuthState();
 
+      // Navigation capture: detect top-frame navigations while recording
+      chrome.webNavigation.onCompleted.addListener((details) => {
+        if (details.frameId !== 0) return; // top frame only
+        if (!recordingPort) return; // not recording
+
+        // Read active recording session to populate recordingId
+        chrome.storage.session.get('activeRecording').then(result => {
+          const activeRecording = result.activeRecording as
+            | { sessionId: string; tabId: number }
+            | undefined;
+          const recordingId = activeRecording?.sessionId ?? '';
+
+          const step: RecordingStep = {
+            id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            recordingId,
+            sequenceIndex: 0,
+            status: 'enriched',
+            action: 'navigate',
+            url: details.url,
+            pageTitle: undefined,
+          };
+
+          // Try to get the page title
+          chrome.tabs.get(details.tabId).then(tab => {
+            step.pageTitle = tab.title;
+            recordingPort?.postMessage({ type: 'RECORDING_STEP', step });
+            putRecordingStep(db, step as any).catch(err =>
+              console.error('[Cohand] Failed to persist nav step:', err),
+            );
+          }).catch(() => {
+            recordingPort?.postMessage({ type: 'RECORDING_STEP', step });
+            putRecordingStep(db, step as any).catch(() => {});
+          });
+        }).catch(() => {});
+      });
+
       console.log('[Cohand] Service worker initialized');
     } catch (err) {
       console.error('[Cohand] Init error:', err);
@@ -321,6 +357,16 @@ export default defineBackground(() => {
     return { runs };
   });
 
+  router.on('GET_SCRIPT_VERSIONS', async (msg) => {
+    const versions = await getScriptVersionsForTask(db, msg.taskId);
+    return { versions };
+  });
+
+  router.on('GET_TASK_STATE', async (msg) => {
+    const state = await getTaskState(db, msg.taskId);
+    return { state };
+  });
+
   // ---------------------------------------------------------------------------
   // Script execution
   // ---------------------------------------------------------------------------
@@ -414,10 +460,56 @@ export default defineBackground(() => {
   // ---------------------------------------------------------------------------
 
   router.on('GET_A11Y_TREE', async (msg) => {
-    const response = await chrome.tabs.sendMessage(msg.tabId, {
-      type: 'GET_A11Y_TREE',
-    });
-    return { tree: response?.tree ?? response };
+    try {
+      const response = await chrome.tabs.sendMessage(msg.tabId, {
+        type: 'GET_A11Y_TREE',
+      });
+      return { tree: response?.tree ?? response };
+    } catch {
+      // Content script injection failed (chrome://, Web Store, restricted pages).
+      // Fall back to CDP Accessibility.queryAXTree.
+      console.log(`[Cohand] Content script unavailable for tab ${msg.tabId}, falling back to CDP a11y`);
+      try {
+        await cdp.attach(msg.tabId);
+        try {
+          const docResult = await cdp.send(msg.tabId, 'DOM.getDocument', { depth: 0 }) as {
+            root: { backendNodeId: number };
+          };
+          const axResult = await cdp.send(msg.tabId, 'Accessibility.queryAXTree', {
+            backendNodeId: docResult.root.backendNodeId,
+          }) as {
+            nodes?: Array<{
+              role?: { value?: string };
+              name?: { value?: string };
+              nodeId?: string;
+              properties?: unknown[];
+            }>;
+          };
+
+          const cdpNodes = axResult?.nodes ?? [];
+          const tree = cdpNodes.length > 0
+            ? {
+                role: 'document',
+                name: 'CDP Fallback Tree',
+                refId: '',
+                children: cdpNodes
+                  .filter(n => n.role?.value && n.role.value !== 'none' && n.role.value !== 'ignored')
+                  .map(n => ({
+                    role: n.role?.value ?? 'generic',
+                    name: n.name?.value ?? '',
+                    refId: n.nodeId ?? '',
+                  })),
+              }
+            : null;
+          return { tree };
+        } finally {
+          await cdp.detach(msg.tabId);
+        }
+      } catch (cdpErr) {
+        console.error(`[Cohand] CDP a11y fallback failed for tab ${msg.tabId}:`, cdpErr);
+        return { tree: null };
+      }
+    }
   });
 
   router.on('SCREENSHOT', async (msg) => {
@@ -450,6 +542,22 @@ export default defineBackground(() => {
   router.on('DETACH_DEBUGGER', async (msg) => {
     await cdp.detach(msg.tabId);
     return { ok: true as const };
+  });
+
+  // CDP_COMMAND — arbitrary CDP command passthrough for Remote mode
+  router.on('CDP_COMMAND', async (msg) => {
+    try {
+      if (!cdp.isAttached(msg.tabId)) {
+        return { ok: false, error: `Tab ${msg.tabId} not attached` };
+      }
+      const result = await cdp.send(msg.tabId, msg.method, msg.params);
+      return { ok: true, result };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   });
 
   // ---------------------------------------------------------------------------
@@ -516,11 +624,17 @@ export default defineBackground(() => {
       trackedTabs: [msg.tabId],
       stepCount: 0,
     });
+    // Persist active recording session info so webNavigation listener can
+    // associate navigation events with the current recording session
+    await chrome.storage.session.set({
+      activeRecording: { sessionId, tabId: msg.tabId },
+    });
     return { ok: true as const, sessionId };
   });
 
   router.on('STOP_RECORDING', async (_msg) => {
-    // Could update recording.completedAt here in future
+    // Clear active recording session info from storage
+    await chrome.storage.session.remove('activeRecording');
     return { ok: true as const };
   });
 
@@ -592,6 +706,32 @@ export default defineBackground(() => {
         console.error('[Cohand] Failed to process recording action:', err);
       }
     })();
+
+    return { ok: true as const };
+  });
+
+  router.on('KEYSTROKE_UPDATE', async (msg) => {
+    // Only process if recording is active (port connected)
+    if (!recordingPort) return { ok: true as const };
+
+    // Only create a recording step for final keystrokes (focus left the field)
+    if (!msg.isFinal) return { ok: true as const };
+
+    const step: RecordingStep = {
+      id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      recordingId: '',
+      sequenceIndex: 0,
+      status: 'enriched',
+      action: 'type',
+      selector: msg.element.selector,
+      elementTag: msg.element.tag,
+      elementText: msg.element.name,
+      typedText: msg.text,
+    };
+
+    // Persist and forward
+    await putRecordingStep(db, step as any);
+    recordingPort?.postMessage({ type: 'RECORDING_STEP', step });
 
     return { ok: true as const };
   });

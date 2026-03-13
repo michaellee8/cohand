@@ -14,14 +14,17 @@ import {
 } from './humanize';
 import { createPRNG, randomInRange } from './prng';
 import { isDomainAllowed, isSensitivePage } from './security/domain-guard';
-import { MAX_TEXT_CONTENT_LENGTH, MAX_CUMULATIVE_READS } from '../constants';
+import { MAX_TEXT_CONTENT_LENGTH, MAX_CUMULATIVE_READS, NAVIGATOR_RATE_LIMIT } from '../constants';
 import { RPCHandler, type RPCMethodHandler } from './rpc-handler';
+import { deliverNotification } from './notifications';
 
 export interface HandlerContext {
   cdp: CDPManager;
   getAllowedDomains: (taskId: string) => Promise<string[]>;
   getTabUrl: (tabId: number) => Promise<string>;
   getTabId: (taskId: string) => number | undefined;
+  db: IDBDatabase;
+  getTask: (taskId: string) => Promise<{ name: string; notifyEnabled?: boolean } | undefined>;
 }
 
 /**
@@ -53,6 +56,42 @@ function trackRead(taskId: string, bytes: number): void {
   }
 }
 
+/**
+ * Track navigation timestamps per task for rate limiting.
+ * Max NAVIGATOR_RATE_LIMIT (5) navigations per 60 seconds.
+ */
+const navigationTimestamps = new Map<string, number[]>();
+
+export function resetNavigationTimestamps(taskId: string): void {
+  navigationTimestamps.delete(taskId);
+}
+
+export class NavigationRateLimitError extends Error {
+  constructor(taskId: string) {
+    super(
+      `Task ${taskId} exceeded navigation rate limit: max ${NAVIGATOR_RATE_LIMIT} per 60 seconds`,
+    );
+    this.name = 'NavigationRateLimitError';
+  }
+}
+
+function checkNavigationRateLimit(taskId: string): void {
+  const now = Date.now();
+  const windowMs = 60_000; // 60 seconds
+  let timestamps = navigationTimestamps.get(taskId) ?? [];
+
+  // Remove timestamps older than the window
+  timestamps = timestamps.filter(t => now - t < windowMs);
+
+  if (timestamps.length >= NAVIGATOR_RATE_LIMIT) {
+    navigationTimestamps.set(taskId, timestamps);
+    throw new NavigationRateLimitError(taskId);
+  }
+
+  timestamps.push(now);
+  navigationTimestamps.set(taskId, timestamps);
+}
+
 const ALLOWED_ATTRIBUTES = [
   'href',
   'aria-label',
@@ -61,6 +100,25 @@ const ALLOWED_ATTRIBUTES = [
   'alt',
   'data-testid',
 ];
+
+/**
+ * Maximum characters per humanizedType chunk.
+ * Long text (e.g., pasting a paragraph) is broken into smaller RPCs
+ * so each stays within the 30-60s timeout window.
+ */
+const TYPE_CHUNK_SIZE = 50;
+
+/**
+ * Break a long text string into chunks for sequential typing.
+ */
+function chunkText(text: string, chunkSize: number = TYPE_CHUNK_SIZE): string[] {
+  if (text.length <= chunkSize) return [text];
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += chunkSize) {
+    chunks.push(text.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
 
 /**
  * Register all HumanizedPage RPC methods on the RPCHandler.
@@ -125,6 +183,12 @@ export function registerPageMethods(
             error: { type: 'ReadLimitExceeded', message: err.message },
           };
         }
+        if (err instanceof NavigationRateLimitError) {
+          return {
+            ok: false,
+            error: { type: 'RateLimitExceeded', message: err.message },
+          };
+        }
         const message =
           err instanceof Error ? err.message : String(err);
         return {
@@ -141,6 +205,9 @@ export function registerPageMethods(
     makeHandler(async (rpc, ctx) => {
       const [url] = rpc.args.args as [string];
       const tabId = ctx.getTabId(rpc.taskId)!;
+
+      // Rate limit navigations per task
+      checkNavigationRateLimit(rpc.taskId);
 
       // Block dangerous URL schemes
       const BLOCKED_GOTO_SCHEMES = ['javascript:', 'data:', 'file:', 'blob:', 'vbscript:'];
@@ -227,8 +294,11 @@ export function registerPageMethods(
         modifiers: 2,
       });
 
-      // Type new text
-      await humanizedType(ctx.cdp, tabId, rng, text);
+      // Type new text — chunk long strings to keep each segment within timeout
+      const chunks = chunkText(text);
+      for (const chunk of chunks) {
+        await humanizedType(ctx.cdp, tabId, rng, chunk);
+      }
       return undefined;
     }),
   );
@@ -250,7 +320,11 @@ export function registerPageMethods(
         randomInRange(rng, 0.3, 0.7) * element.bounds.height;
 
       await humanizedClick(ctx.cdp, tabId, rng, targetX, targetY);
-      await humanizedType(ctx.cdp, tabId, rng, text);
+      // Chunk long text to keep each segment within timeout
+      const chunks = chunkText(text);
+      for (const chunk of chunks) {
+        await humanizedType(ctx.cdp, tabId, rng, chunk);
+      }
       return undefined;
     }),
   );
@@ -500,16 +574,32 @@ export function registerPageMethods(
   );
 
   // notify -- special method, not a page action.
-  // TODO: Wire to actual notification delivery (deliverNotification in notifications.ts).
-  // Currently a stub that acknowledges the notification without persisting it.
   // Registered directly (no makeHandler) because notify doesn't interact with
   // the page and should not require domain validation.
   handler.register('notify', async (rpc) => {
+    const message = (rpc.args as { message?: string }).message;
+    if (!message) {
+      return { ok: true, value: { queued: false, reason: 'No message provided' } };
+    }
+
+    const task = await ctx.getTask(rpc.taskId);
+    const taskName = task?.name ?? rpc.taskId;
+    const notifyEnabled = task?.notifyEnabled;
+
+    const result = await deliverNotification(
+      rpc.taskId,
+      taskName,
+      message,
+      ctx.db,
+      { notifyEnabled },
+    );
+
     return {
       ok: true,
       value: {
-        queued: true,
-        message: (rpc.args as { message?: string }).message,
+        queued: result.delivered,
+        message,
+        reason: result.reason,
       },
     };
   });

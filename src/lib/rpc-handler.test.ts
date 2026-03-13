@@ -1,4 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock keepalive to prevent setInterval from running with fake timers
+vi.mock('./keepalive', () => ({
+  startKeepalive: vi.fn(),
+  stopKeepalive: vi.fn(),
+  isKeepaliveActive: vi.fn().mockReturnValue(false),
+}));
+
 import { RPCHandler } from './rpc-handler';
 import type { ScriptRPC } from '../types';
 

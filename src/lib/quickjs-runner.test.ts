@@ -379,6 +379,45 @@ describe('quickjs-runner', () => {
     });
   });
 
+  describe('dangerous globals stripping (Layer 4 hardening)', () => {
+    it('sets eval, Function, Proxy, Reflect to undefined on global', async () => {
+      await createQuickJSExecutor(
+        'async function run() {}',
+        'task-1',
+        {},
+        mockRpcCallback,
+      );
+
+      // Check that setProp was called with undefined for each dangerous global
+      const setPropCalls = mockContext.setProp.mock.calls as any[];
+      const dangerousGlobals = ['eval', 'Function', 'Proxy', 'Reflect'];
+      for (const name of dangerousGlobals) {
+        const found = setPropCalls.some(
+          (call: any[]) => call[0] === mockContext.global && call[1] === name && call[2] === mockContext.undefined,
+        );
+        expect(found, `Expected ${name} to be set to undefined on global`).toBe(true);
+      }
+    });
+
+    it('executes hardening script to strip function constructors', async () => {
+      await createQuickJSExecutor(
+        'async function run() {}',
+        'task-1',
+        {},
+        mockRpcCallback,
+      );
+
+      // Check that evalCode was called with the hardening script
+      const evalCodeCalls = mockContext.evalCode.mock.calls as any[];
+      expect(evalCodeCalls.length).toBeGreaterThanOrEqual(1);
+      const hardeningCall = evalCodeCalls.find(
+        (call: any[]) => (call[0] as string).includes('AF') && (call[0] as string).includes('GF'),
+      );
+      expect(hardeningCall).toBeDefined();
+      expect(hardeningCall[1]).toBe('hardening.js');
+    });
+  });
+
   describe('script interpolation safety', () => {
     it('wrapper correctly contains scripts with backticks', async () => {
       const sourceWithBackticks = 'async function run() { var s = `hello`; return s; }';

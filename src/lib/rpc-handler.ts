@@ -1,4 +1,5 @@
 import type { ScriptRPC, ScriptRPCResult, ScriptRPCErrorType } from '../types';
+import { startKeepalive, stopKeepalive } from './keepalive';
 
 export type RPCMethodHandler = (
   rpc: ScriptRPC,
@@ -14,6 +15,12 @@ export class RPCHandler {
   /** Call this from chrome.runtime.onConnect handler */
   handleConnection(port: chrome.runtime.Port): void {
     if (port.name !== 'script-rpc') return;
+
+    // Start keepalive pinging while this execution port is alive
+    startKeepalive(port);
+    port.onDisconnect.addListener(() => {
+      stopKeepalive();
+    });
 
     port.onMessage.addListener(async (rpc: ScriptRPC) => {
       // Check deadline

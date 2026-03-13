@@ -1,12 +1,22 @@
 // @vitest-environment happy-dom
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { generateAccessibilityTree, getElementByRefId, clearRefMap } from './a11y-tree';
+import {
+  generateAccessibilityTree,
+  getElementByRefId,
+  clearRefMap,
+  receiveFrameSubtree,
+  mergeFrameSubtrees,
+  clearFrameSubtrees,
+  isTopFrame,
+  sendSubtreeToParent,
+} from './a11y-tree';
 import type { A11yNode } from './a11y-tree';
 
 beforeEach(() => {
   document.body.innerHTML = '';
   clearRefMap();
+  clearFrameSubtrees();
 });
 
 describe('generateAccessibilityTree', () => {
@@ -564,6 +574,162 @@ describe('shadow DOM traversal', () => {
     const shadowBtn = nodes.find(n => n.role === 'button' && n.name === 'Shadow Button');
     expect(shadowBtn).toBeDefined();
     expect(shadowBtn!.interactive).toBe(true);
+  });
+});
+
+describe('bounding box population', () => {
+  it('sets bounds on interactive elements', () => {
+    document.body.innerHTML = `<button>Click me</button>`;
+
+    const tree = generateAccessibilityTree();
+    const nodes = flattenTree(tree!);
+    const button = nodes.find(n => n.role === 'button' && n.name === 'Click me');
+
+    expect(button).toBeDefined();
+    expect(button!.bounds).toBeDefined();
+    expect(button!.bounds).toHaveProperty('x');
+    expect(button!.bounds).toHaveProperty('y');
+    expect(button!.bounds).toHaveProperty('width');
+    expect(button!.bounds).toHaveProperty('height');
+    // happy-dom returns 0 for getBoundingClientRect but the shape should be correct
+    expect(typeof button!.bounds!.x).toBe('number');
+    expect(typeof button!.bounds!.y).toBe('number');
+    expect(typeof button!.bounds!.width).toBe('number');
+    expect(typeof button!.bounds!.height).toBe('number');
+  });
+
+  it('sets bounds on non-generic semantic elements', () => {
+    document.body.innerHTML = `<nav><a href="/home">Home</a></nav>`;
+
+    const tree = generateAccessibilityTree();
+    const nodes = flattenTree(tree!);
+    const nav = nodes.find(n => n.role === 'navigation');
+
+    expect(nav).toBeDefined();
+    expect(nav!.bounds).toBeDefined();
+  });
+
+  it('does not set bounds on generic containers (empty refId)', () => {
+    document.body.innerHTML = `
+      <div>
+        <button>A</button>
+        <button>B</button>
+      </div>
+    `;
+
+    const tree = generateAccessibilityTree();
+    // Root is generic, non-interactive — should not have bounds
+    expect(tree!.role).toBe('generic');
+    expect(tree!.refId).toBe('');
+    expect(tree!.bounds).toBeUndefined();
+  });
+});
+
+describe('cross-frame a11y tree merging', () => {
+  it('mergeFrameSubtrees returns original tree when no frames', () => {
+    const mainTree: A11yNode = {
+      role: 'document',
+      name: '',
+      refId: 'ref-0',
+      children: [{ role: 'button', name: 'Click', refId: 'ref-1' }],
+    };
+
+    const result = mergeFrameSubtrees(mainTree);
+    expect(result).toEqual(mainTree);
+  });
+
+  it('mergeFrameSubtrees appends iframe subtrees as group children', () => {
+    const mainTree: A11yNode = {
+      role: 'document',
+      name: '',
+      refId: 'ref-0',
+      children: [{ role: 'button', name: 'Main Button', refId: 'ref-1' }],
+    };
+
+    const iframeSubtree: A11yNode = {
+      role: 'document',
+      name: '',
+      refId: '',
+      children: [{ role: 'link', name: 'Iframe Link', refId: 'ref-iframe-1' }],
+    };
+
+    receiveFrameSubtree('frame-example-com', iframeSubtree);
+    const result = mergeFrameSubtrees(mainTree);
+
+    // Should have 2 children: the main button + the iframe group
+    expect(result.children).toHaveLength(2);
+    expect(result.children![0].role).toBe('button');
+    expect(result.children![1].role).toBe('group');
+    expect(result.children![1].name).toBe('iframe:frame-example-com');
+    expect(result.children![1].children![0]).toEqual(iframeSubtree);
+  });
+
+  it('multiple frames are merged correctly', () => {
+    const mainTree: A11yNode = {
+      role: 'document',
+      name: '',
+      refId: 'ref-0',
+    };
+
+    receiveFrameSubtree('frame-a', { role: 'button', name: 'A', refId: 'a-1' });
+    receiveFrameSubtree('frame-b', { role: 'link', name: 'B', refId: 'b-1' });
+
+    const result = mergeFrameSubtrees(mainTree);
+    expect(result.children).toHaveLength(2);
+    expect(result.children![0].name).toBe('iframe:frame-a');
+    expect(result.children![1].name).toBe('iframe:frame-b');
+  });
+
+  it('receiveFrameSubtree overwrites previous subtree from same frame', () => {
+    const mainTree: A11yNode = {
+      role: 'document',
+      name: '',
+      refId: 'ref-0',
+    };
+
+    receiveFrameSubtree('frame-a', { role: 'button', name: 'Old', refId: 'a-1' });
+    receiveFrameSubtree('frame-a', { role: 'button', name: 'New', refId: 'a-2' });
+
+    const result = mergeFrameSubtrees(mainTree);
+    expect(result.children).toHaveLength(1);
+    expect(result.children![0].children![0].name).toBe('New');
+  });
+
+  it('clearFrameSubtrees removes all stored subtrees', () => {
+    const mainTree: A11yNode = {
+      role: 'document',
+      name: '',
+      refId: 'ref-0',
+    };
+
+    receiveFrameSubtree('frame-a', { role: 'button', name: 'A', refId: 'a-1' });
+    clearFrameSubtrees();
+
+    const result = mergeFrameSubtrees(mainTree);
+    // No children added since subtrees were cleared
+    expect(result.children).toBeUndefined();
+  });
+
+  it('isTopFrame returns true in test environment (no parent frame)', () => {
+    // In vitest/happy-dom, window === window.top
+    expect(isTopFrame()).toBe(true);
+  });
+
+  it('mergeFrameSubtrees does not mutate the original tree', () => {
+    const mainTree: A11yNode = {
+      role: 'document',
+      name: '',
+      refId: 'ref-0',
+      children: [{ role: 'button', name: 'Main', refId: 'ref-1' }],
+    };
+
+    const originalChildren = mainTree.children;
+    receiveFrameSubtree('frame-a', { role: 'link', name: 'Frame', refId: 'f-1' });
+    mergeFrameSubtrees(mainTree);
+
+    // Original tree's children array should not be modified
+    expect(mainTree.children).toBe(originalChildren);
+    expect(mainTree.children).toHaveLength(1);
   });
 });
 

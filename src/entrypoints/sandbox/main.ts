@@ -1,6 +1,7 @@
 // Sandbox-side: executes scripts in QuickJS WASM isolation.
 // Scripts have NO access to browser globals — only the page proxy and context.
 import { createQuickJSExecutor } from '../../lib/quickjs-runner';
+import { QuickJSPool } from '../../lib/quickjs-pool';
 import { QUICKJS_TIMEOUT_MS } from '../../constants';
 
 console.log('[Cohand] Sandbox loaded (QuickJS WASM)');
@@ -10,6 +11,16 @@ const PARENT_ORIGIN = (() => {
   try { return new URL(chrome.runtime.getURL('')).origin; }
   catch { throw new Error('Cannot determine parent origin'); }
 })();
+
+// ---------------------------------------------------------------------------
+// Module pool — pre-warm 3 WASM modules so concurrent tasks don't block
+// ---------------------------------------------------------------------------
+const pool = new QuickJSPool();
+const poolReady = pool.init().then(() => {
+  console.log(`[Cohand] QuickJS module pool ready (${pool.size} modules)`);
+}).catch(err => {
+  console.error('[Cohand] Failed to initialize QuickJS module pool:', err);
+});
 
 // Pending RPC callbacks — used by quickjs-runner's rpcCallback to send RPCs to parent
 const pendingRPCs = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -43,7 +54,14 @@ window.addEventListener('message', async (event) => {
   if (data.type === 'execute-script') {
     const { executionId, taskId, source, state } = data;
 
+    // Wait for pool to be ready before first execution
+    await poolReady;
+
+    let wasmModule;
     try {
+      // Acquire a module from the pool (blocks if all in use)
+      wasmModule = await pool.acquire();
+
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Script execution timed out')), QUICKJS_TIMEOUT_MS)
       );
@@ -54,6 +72,7 @@ window.addEventListener('message', async (event) => {
           state || {},
           // RPC callback: forward to parent via postMessage
           (tid, method, args) => sendRPC(tid, method, args),
+          wasmModule,
         ),
         timeoutPromise,
       ]);
@@ -73,6 +92,11 @@ window.addEventListener('message', async (event) => {
         ok: false,
         error: err.message || String(err),
       }, PARENT_ORIGIN);
+    } finally {
+      // Always release the module back to the pool
+      if (wasmModule) {
+        pool.release(wasmModule);
+      }
     }
   }
 });

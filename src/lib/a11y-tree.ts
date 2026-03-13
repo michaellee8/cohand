@@ -198,6 +198,17 @@ function walkElement(element: Element, depth: number = 0): A11yNode | null {
     refId: interactive || role !== 'generic' ? getRefId(element) : '',
   };
 
+  // Populate bounding box from getBoundingClientRect
+  if (node.refId) {
+    const rect = element.getBoundingClientRect();
+    node.bounds = {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+    };
+  }
+
   if (children.length > 0) node.children = children;
   if (attributes) node.attributes = attributes;
   if (interactive) node.interactive = true;
@@ -226,4 +237,89 @@ export function getElementByRefId(refId: string): Element | null {
 export function clearRefMap(): void {
   refMap.clear();
   nextRefId = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-frame a11y tree merging
+// ---------------------------------------------------------------------------
+
+/** Message sent by iframe content scripts to the top frame via postMessage. */
+export interface FrameSubtreeMessage {
+  type: 'COHAND_FRAME_SUBTREE';
+  frameId: string;
+  subtree: A11yNode;
+}
+
+// Stored subtrees received from iframes
+const frameSubtrees = new Map<string, A11yNode>();
+
+/**
+ * Handle an incoming subtree from an iframe content script instance.
+ * Called by the top-level content script's message listener.
+ */
+export function receiveFrameSubtree(frameId: string, subtree: A11yNode): void {
+  frameSubtrees.set(frameId, subtree);
+}
+
+/**
+ * Clear all stored frame subtrees (called before fresh tree generation).
+ */
+export function clearFrameSubtrees(): void {
+  frameSubtrees.clear();
+}
+
+/**
+ * Merge stored iframe subtrees into a main a11y tree.
+ *
+ * Strategy: iframe subtrees are appended as children of the root node.
+ * Each subtree is wrapped in a node with role="group" and a name
+ * indicating the iframe source.
+ */
+export function mergeFrameSubtrees(mainTree: A11yNode): A11yNode {
+  if (frameSubtrees.size === 0) return mainTree;
+
+  const merged = { ...mainTree };
+  const children = merged.children ? [...merged.children] : [];
+
+  for (const [frameId, subtree] of frameSubtrees) {
+    children.push({
+      role: 'group',
+      name: `iframe:${frameId}`,
+      refId: '',
+      children: [subtree],
+    });
+  }
+
+  merged.children = children;
+  return merged;
+}
+
+/**
+ * Whether the current window is the top-level frame.
+ */
+export function isTopFrame(): boolean {
+  try {
+    return window === window.top;
+  } catch {
+    // Cross-origin access denied — we're in a frame
+    return false;
+  }
+}
+
+/**
+ * Send the local a11y subtree to the parent frame (top-level content script).
+ * Called from iframe content script instances.
+ */
+export function sendSubtreeToParent(subtree: A11yNode): void {
+  const frameId = `frame-${location.hostname}-${location.pathname}`;
+  const msg: FrameSubtreeMessage = {
+    type: 'COHAND_FRAME_SUBTREE',
+    frameId,
+    subtree,
+  };
+  try {
+    window.parent.postMessage(msg, '*');
+  } catch {
+    // Cross-origin — postMessage may be blocked
+  }
 }

@@ -1,6 +1,24 @@
 import type { ScriptRPC, ScriptRPCResult, ScriptRPCError, ScriptRPCErrorType } from '../types';
 import { RPC_TIMEOUT_MS } from '../constants';
 
+// Design spec: vary timeout within 30-60s range based on method type
+const RPC_TIMEOUT_MIN_MS = 30_000;
+const RPC_TIMEOUT_MAX_MS = 60_000;
+
+// Methods that involve humanized interaction tend to take longer
+const LONG_METHODS = new Set([
+  'type', 'fill', 'scroll', 'goto', 'waitForSelector', 'waitForLoadState',
+]);
+
+/**
+ * Compute per-method timeout within the 30-60s range.
+ * Long methods (type, fill, scroll, goto, waitFor*) get the full 60s.
+ * Short methods (click, url, title, etc.) get 30s.
+ */
+export function getMethodTimeout(method: string): number {
+  return LONG_METHODS.has(method) ? RPC_TIMEOUT_MAX_MS : RPC_TIMEOUT_MIN_MS;
+}
+
 export class RPCError extends Error {
   type: ScriptRPCErrorType;
   constructor(error: ScriptRPCError) {
@@ -62,7 +80,7 @@ export class RPCClient {
     }
 
     const id = this.nextId++;
-    const timeout = deadlineMs ?? RPC_TIMEOUT_MS;
+    const timeout = deadlineMs ?? getMethodTimeout(method);
     const deadline = Date.now() + timeout;
 
     return new Promise<unknown>((resolve, reject) => {
