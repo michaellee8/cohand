@@ -38,9 +38,36 @@ Rules:
 3. Handle errors gracefully (wrap unreliable operations in try/catch)
 4. Store useful data in context.state for persistence between runs
 5. Use context.notify() to alert the user about important changes
-6. DO NOT use eval, Function, fetch, import, require, or any blocked APIs
-7. Keep scripts focused and simple
-8. Return a result object summarizing what was done`;
+6. Keep scripts focused and simple
+7. Return a result object summarizing what was done
+
+Security constraints (scripts are statically analyzed and will be REJECTED if they violate these):
+
+Blocked globals — do NOT reference these anywhere:
+  eval, Function, Proxy, Reflect, fetch, XMLHttpRequest, WebSocket, importScripts, require
+
+Blocked property access — do NOT access these on any object:
+  constructor, __proto__, prototype, evaluate, $, $$, content,
+  mouse, keyboard, route, exposeFunction, addInitScript,
+  getPrototypeOf, getOwnPropertyDescriptor, defineProperty, setPrototypeOf,
+  getOwnPropertyNames, getOwnPropertySymbols
+
+Blocked patterns:
+  - No dynamic import() expressions
+  - No computed member access with variables (e.g. obj[key] is BLOCKED). Only literal keys are allowed: obj.prop or obj["literal"]
+  - No \`with\` statements
+  - No tagged template expressions (e.g. fn\`...\`)
+  - No string concatenation that builds blocked names (e.g. 'con' + 'structor')
+
+Runtime limits:
+  - 32 MB memory limit, 5 minute execution timeout
+  - textContent() returns max 500 characters per call; cumulative text reads capped at 50 KB per execution
+  - context.state must be JSON-serializable and under 1 MB total
+  - getAttribute() only works for whitelisted attributes: href, aria-label, role, title, alt, data-testid
+
+Domain constraints:
+  - Scripts can only navigate to domains listed in the task's allowed domains
+  - Sensitive paths are automatically blocked: /settings, /account, /security, /password, /login, /signin, /signup, /register, /admin, /oauth, /auth, /billing, /payment, /2fa, /mfa`;
 
 export const SCRIPT_GENERATION_PROMPT = `Based on the following page observation and user request, generate an automation script.
 
