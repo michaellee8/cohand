@@ -262,7 +262,7 @@ function ObserveStep() {
 }
 
 function ReviewStep() {
-  const { generatedScript, astValid, securityPassed } = useWizardStore();
+  const { generatedScript, astValid, astErrors, securityPassed, securityReviewDetails } = useWizardStore();
 
   return (
     <div className="space-y-3">
@@ -282,9 +282,31 @@ function ReviewStep() {
         </pre>
       </div>
 
+      {!astValid && astErrors.length > 0 && (
+        <div className="px-3 py-2 bg-red-50 text-red-700 text-xs rounded-lg space-y-1">
+          <p className="font-medium">AST validation failed:</p>
+          <ul className="list-disc list-inside space-y-0.5">
+            {astErrors.map((err, i) => (
+              <li key={i}>{err}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {!securityPassed && (
-        <div className="px-3 py-2 bg-yellow-50 text-yellow-700 text-xs rounded-lg">
-          Security review did not pass. The script may still work but has not been approved by the security reviewer.
+        <div className="px-3 py-2 bg-yellow-50 text-yellow-700 text-xs rounded-lg space-y-1">
+          <p className="font-medium">Security review did not pass.</p>
+          {securityReviewDetails.length > 0 ? (
+            <ul className="list-disc list-inside space-y-0.5">
+              {securityReviewDetails
+                .filter(d => !d.approved)
+                .flatMap(d => d.issues.map((issue, i) => (
+                  <li key={`${d.model}-${i}`}>{issue}</li>
+                )))}
+            </ul>
+          ) : (
+            <p>The script has not been approved by the security reviewer.</p>
+          )}
         </div>
       )}
     </div>

@@ -38,15 +38,24 @@ export function TaskDetail({ task, runs, onClose, onDelete }: TaskDetailProps) {
         ) : (
           <div className="space-y-1">
             {runs.map(run => (
-              <div key={run.id} className="flex items-center gap-2 text-xs p-1.5 rounded bg-gray-50">
-                <span className={run.success ? 'text-green-500' : 'text-red-500'}>
-                  {run.success ? 'Pass' : 'Fail'}
-                </span>
-                <span className="text-gray-400">v{run.version}</span>
-                <span className="text-gray-400">{run.durationMs}ms</span>
-                <span className="text-gray-400 ml-auto">
-                  {new Date(run.ranAt).toLocaleTimeString()}
-                </span>
+              <div key={run.id} className="text-xs rounded bg-gray-50">
+                <div className="flex items-center gap-2 p-1.5">
+                  <span className={run.success ? 'text-green-500' : 'text-red-500'}>
+                    {run.success ? 'Pass' : 'Fail'}
+                  </span>
+                  <span className="text-gray-400">v{run.version}</span>
+                  <span className="text-gray-400">{run.durationMs}ms</span>
+                  <span className="text-gray-400 ml-auto">
+                    {new Date(run.ranAt).toLocaleTimeString()}
+                  </span>
+                </div>
+                {!run.success && run.error && (
+                  <div className="px-1.5 pb-1.5">
+                    <pre className="text-[11px] font-mono text-red-600 bg-red-50 rounded px-2 py-1 whitespace-pre-wrap break-words">
+                      {run.error}
+                    </pre>
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -4,6 +4,7 @@ import { generateScript, type ExplorationResult } from '../../../lib/explorer';
 import { securityReview } from '../../../lib/security/security-review';
 import { validateAST } from '../../../lib/security/ast-validator';
 import { getSettings } from '../../../lib/storage';
+import type { ReviewDetail } from '../../../types';
 
 export type WizardStep = 'describe' | 'domains' | 'observe' | 'review' | 'test' | 'schedule';
 
@@ -14,7 +15,9 @@ interface WizardState {
   currentTabUrl: string | null;
   generatedScript: string | null;
   astValid: boolean;
+  astErrors: string[];
   securityPassed: boolean;
+  securityReviewDetails: ReviewDetail[];
   testResult: { success: boolean; result?: unknown; error?: string } | null;
   schedule: { type: 'manual' } | { type: 'interval'; intervalMinutes: number };
   loading: boolean;
@@ -51,7 +54,9 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   currentTabUrl: null,
   generatedScript: null,
   astValid: false,
+  astErrors: [],
   securityPassed: false,
+  securityReviewDetails: [],
   testResult: null,
   schedule: { type: 'manual' },
   loading: false,
@@ -133,6 +138,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
 
       // Step 5: Run dual-model security review (if AST passes)
       let secPassed = false;
+      let reviewDetails: ReviewDetail[] = [];
       if (astResult.valid) {
         try {
           const settings = await getSettings();
@@ -140,6 +146,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
           // Reuse apiKey from above instead of calling initLLM() again
           const reviewResult = await securityReview(genResult.source, reviewModels, apiKey);
           secPassed = reviewResult.approved;
+          reviewDetails = reviewResult.details;
         } catch (err) {
           console.warn('[Cohand] Security review failed, marking as not passed:', err);
         }
@@ -151,7 +158,9 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       set({
         generatedScript: genResult.source,
         astValid: astResult.valid,
+        astErrors: astResult.errors,
         securityPassed: secPassed,
+        securityReviewDetails: reviewDetails,
         loading: false,
       });
     } catch (err: unknown) {
@@ -236,7 +245,9 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     currentTabUrl: null,
     generatedScript: null,
     astValid: false,
+    astErrors: [],
     securityPassed: false,
+    securityReviewDetails: [],
     testResult: null,
     schedule: { type: 'manual' },
     loading: false,
