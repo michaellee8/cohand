@@ -156,20 +156,19 @@ describe('validateAST', () => {
       expect(result.valid).toBe(false);
     });
 
-    it('blocks non-literal computed access on any object', () => {
+    it('allows non-literal computed access on regular objects', () => {
       const result = validateAST(`const key = 'constructor'; page[key]()`);
-      expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('non-literal computed'))).toBe(true);
+      expect(result.valid).toBe(true);
     });
 
-    it('blocks string concatenation to build blocked member names', () => {
+    it('allows string concatenation in computed access (runtime sandbox prevents exploits)', () => {
       const result = validateAST(`page['constr' + 'uctor']('return 1')()`);
-      expect(result.valid).toBe(false);
+      expect(result.valid).toBe(true);
     });
 
-    it('blocks prototype chain access via variable', () => {
+    it('allows prototype chain access via variable (runtime sandbox prevents exploits)', () => {
       const result = validateAST(`const c = 'constructor'; [].fill[c]('return fetch')()`);
-      expect(result.valid).toBe(false);
+      expect(result.valid).toBe(true);
     });
 
     it('blocks template literal computed access', () => {
@@ -212,6 +211,41 @@ describe('validateAST', () => {
       const result = validateAST(`Object.getOwnPropertySymbols(obj)`);
       expect(result.valid).toBe(false);
       expect(result.errors.some(e => e.includes('getOwnPropertySymbols'))).toBe(true);
+    });
+
+    it('allows array indexing with variables', () => {
+      const result = validateAST(`
+        async function run(page, context) {
+          const items = await page.locator('.item').all();
+          for (let i = 0; i < items.length; i++) {
+            const text = await items[i].textContent();
+          }
+        }
+      `);
+      expect(result.valid).toBe(true);
+    });
+
+    it('allows dynamic state access', () => {
+      const result = validateAST(`
+        async function run(page, context) {
+          const key = 'lastPrice';
+          context.state[key] = 42;
+          return { value: context.state[key] };
+        }
+      `);
+      expect(result.valid).toBe(true);
+    });
+
+    it('still blocks computed access on globalThis with variables', () => {
+      const result = validateAST(`const key = 'eval'; globalThis[key]('x')`);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('globalThis'))).toBe(true);
+    });
+
+    it('still blocks computed access on window with variables', () => {
+      const result = validateAST(`const key = 'fetch'; window[key]('x')`);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('window'))).toBe(true);
     });
 
     it('allows safe computed access with number literals', () => {

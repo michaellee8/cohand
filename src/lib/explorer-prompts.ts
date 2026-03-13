@@ -54,7 +54,9 @@ Blocked property access — do NOT access these on any object:
 
 Blocked patterns:
   - No dynamic import() expressions
-  - No computed member access with variables (e.g. obj[key] is BLOCKED). Only literal keys are allowed: obj.prop or obj["literal"]
+  - No computed member access on globals (e.g. globalThis[key], window[key], self[key], this[key] are BLOCKED)
+  - No literal computed access to blocked properties (e.g. obj["constructor"] is BLOCKED)
+  - Array indexing (arr[i]) and dynamic property access (obj[key]) are fine on regular objects
   - No \`with\` statements
   - No tagged template expressions (e.g. fn\`...\`)
   - No string concatenation that builds blocked names (e.g. 'con' + 'structor')

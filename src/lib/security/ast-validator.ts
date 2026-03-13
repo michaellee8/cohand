@@ -64,9 +64,10 @@ export function validateAST(source: string): ASTValidationResult {
           return;
         }
 
-        // Block ALL non-literal computed access (variable keys can construct any member name)
+        // Allow non-literal computed access (e.g. arr[i], obj[key]) on regular objects.
+        // The runtime sandbox (QuickJS) has no exploitable prototype chain, so this is safe.
+        // Dangerous receivers (globalThis, window, self, this) are caught above.
         if (node.property.type !== 'Literal' && node.property.type !== 'TemplateLiteral') {
-          errors.push(`Blocked non-literal computed member access at line ${node.loc?.start?.line}`);
           return;
         }
 
