@@ -110,6 +110,30 @@ describe('remote-auth', () => {
     const second = await getOrCreateToken();
     expect(second).toBe(first);
   });
+
+  it('rejects token of different length (timing-safe, no length oracle)', async () => {
+    const token = await getOrCreateToken();
+    // Shorter token
+    const valid = await validateToken(token.slice(0, 10));
+    expect(valid).toBe(false);
+    // Longer token
+    const valid2 = await validateToken(token + 'extra');
+    expect(valid2).toBe(false);
+  });
+
+  it('rejects empty string when token is stored', async () => {
+    await getOrCreateToken();
+    const valid = await validateToken('');
+    expect(valid).toBe(false);
+  });
+
+  it('rejects same-length but different token', async () => {
+    const token = await getOrCreateToken();
+    // Create a same-length string that differs in every character
+    const wrongToken = token.split('').map(c => c === '0' ? '1' : '0').join('');
+    const valid = await validateToken(wrongToken);
+    expect(valid).toBe(false);
+  });
 });
 
 // ========================
@@ -359,6 +383,66 @@ describe('remote-relay', () => {
       const command: RemoteCommand = {
         id: 13,
         method: 'Accessibility.queryAXTree',
+        tabId: 10,
+      };
+
+      const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+      expect(result.ok).toBe(true);
+    });
+
+    it('blocks commands on sensitive page paths (Finding 4)', async () => {
+      for (const path of ['/settings', '/login', '/password', '/billing', '/admin']) {
+        getTabUrl.mockResolvedValue(`https://example.com${path}`);
+
+        const command: RemoteCommand = {
+          id: 20,
+          method: 'DOM.getDocument',
+          tabId: 10,
+        };
+
+        const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+        expect(result.ok).toBe(false);
+        expect(result.error).toContain('sensitive page path');
+      }
+    });
+
+    it('allows commands on non-sensitive page paths', async () => {
+      getTabUrl.mockResolvedValue('https://example.com/products');
+      mockDebugger.sendCommand.mockResolvedValue({ nodeId: 1 });
+
+      const command: RemoteCommand = {
+        id: 21,
+        method: 'DOM.getDocument',
+        tabId: 10,
+      };
+
+      const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+      expect(result.ok).toBe(true);
+    });
+
+    it('blocks Page.navigate to disallowed domain (Finding 6)', async () => {
+      getTabUrl.mockResolvedValue('https://example.com');
+
+      const command: RemoteCommand = {
+        id: 30,
+        method: 'Page.navigate',
+        params: { url: 'https://evil.com/phish' },
+        tabId: 10,
+      };
+
+      const result = await executeRemoteCommand(cdp, command, ['example.com'], getTabUrl);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('Navigation to disallowed domain blocked');
+    });
+
+    it('allows Page.navigate to allowed domain (Finding 6)', async () => {
+      getTabUrl.mockResolvedValue('https://example.com');
+      mockDebugger.sendCommand.mockResolvedValue({ frameId: 'abc' });
+
+      const command: RemoteCommand = {
+        id: 31,
+        method: 'Page.navigate',
+        params: { url: 'https://example.com/other-page' },
         tabId: 10,
       };
 

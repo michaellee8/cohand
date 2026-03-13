@@ -419,6 +419,87 @@ describe('generateAccessibilityTree', () => {
     // It has two children so it won't be collapsed
     expect(tree?.role).toBe('generic');
   });
+
+  it('redacts password input values', () => {
+    document.body.innerHTML = `
+      <input type="password" aria-label="Password" value="secret123" />
+    `;
+    // happy-dom may not reflect the value attribute into .value automatically,
+    // so set it programmatically
+    const input = document.querySelector('input') as HTMLInputElement;
+    input.value = 'secret123';
+
+    const tree = generateAccessibilityTree();
+    const nodes = flattenTree(tree!);
+    const pw = nodes.find(n => n.name === 'Password');
+    expect(pw).toBeDefined();
+    expect(pw!.attributes?.value).toBe('[REDACTED]');
+  });
+
+  it('redacts values for sensitive autocomplete inputs', () => {
+    document.body.innerHTML = `
+      <input type="text" autocomplete="cc-number" aria-label="Card" />
+      <input type="text" autocomplete="one-time-code" aria-label="OTP" />
+    `;
+    const inputs = document.querySelectorAll('input');
+    (inputs[0] as HTMLInputElement).value = '4111111111111111';
+    (inputs[1] as HTMLInputElement).value = '123456';
+
+    const tree = generateAccessibilityTree();
+    const nodes = flattenTree(tree!);
+
+    const card = nodes.find(n => n.name === 'Card');
+    expect(card).toBeDefined();
+    expect(card!.attributes?.value).toBe('[REDACTED]');
+
+    const otp = nodes.find(n => n.name === 'OTP');
+    expect(otp).toBeDefined();
+    expect(otp!.attributes?.value).toBe('[REDACTED]');
+  });
+
+  it('redacts values for inputs with sensitive name/id patterns', () => {
+    document.body.innerHTML = `
+      <input type="text" name="user_password" aria-label="PW" />
+      <input type="text" id="ssn-field" aria-label="SSN" />
+    `;
+    const inputs = document.querySelectorAll('input');
+    (inputs[0] as HTMLInputElement).value = 'hunter2';
+    (inputs[1] as HTMLInputElement).value = '123-45-6789';
+
+    const tree = generateAccessibilityTree();
+    const nodes = flattenTree(tree!);
+
+    expect(nodes.find(n => n.name === 'PW')!.attributes?.value).toBe('[REDACTED]');
+    expect(nodes.find(n => n.name === 'SSN')!.attributes?.value).toBe('[REDACTED]');
+  });
+
+  it('does NOT redact values for non-sensitive text inputs', () => {
+    document.body.innerHTML = `
+      <input type="text" aria-label="Username" />
+    `;
+    const input = document.querySelector('input') as HTMLInputElement;
+    input.value = 'alice';
+
+    const tree = generateAccessibilityTree();
+    const nodes = flattenTree(tree!);
+    const username = nodes.find(n => n.name === 'Username');
+    expect(username).toBeDefined();
+    expect(username!.attributes?.value).toBe('alice');
+  });
+
+  it('uses CSS.escape for label-for selectors', () => {
+    // An ID with CSS metacharacters should still match via CSS.escape
+    document.body.innerHTML = `
+      <label for="field:name">Field Name</label>
+      <input id="field:name" type="text" />
+    `;
+
+    const tree = generateAccessibilityTree();
+    const nodes = flattenTree(tree!);
+    const input = nodes.find(n => n.role === 'textbox');
+    expect(input).toBeDefined();
+    expect(input!.name).toBe('Field Name');
+  });
 });
 
 describe('getElementByRefId', () => {

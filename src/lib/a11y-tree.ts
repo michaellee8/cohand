@@ -1,3 +1,5 @@
+import { isSensitiveInput } from './security/sensitive-input';
+
 export interface A11yNode {
   role: string;
   name: string;
@@ -84,7 +86,7 @@ function getAccessibleName(element: Element): string {
 
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
     if (element.id) {
-      const labelEl = document.querySelector(`label[for="${element.id}"]`);
+      const labelEl = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
       if (labelEl) return labelEl.textContent?.trim() || '';
     }
   }
@@ -120,7 +122,9 @@ function getAttributes(element: Element): Record<string, string> | undefined {
   if (href) attrs.href = href;
 
   if (element instanceof HTMLInputElement) {
-    if (element.value) attrs.value = element.value;
+    if (element.value) {
+      attrs.value = isSensitiveInput(element) ? '[REDACTED]' : element.value;
+    }
     if (element.type === 'checkbox' || element.type === 'radio') {
       attrs.checked = String(element.checked);
     }

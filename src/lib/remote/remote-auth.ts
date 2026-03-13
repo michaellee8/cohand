@@ -21,20 +21,15 @@ export async function getOrCreateToken(): Promise<string> {
 
 /**
  * Timing-safe string comparison to prevent timing attacks.
- * Compares two strings byte-by-byte with constant time using XOR accumulator.
+ * Always loops for max(a.length, b.length) iterations with no branching
+ * on length, avoiding both the length oracle and compiler optimizations
+ * that could eliminate the dummy self-XOR path.
  */
 function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    // Still do a dummy comparison to avoid leaking length info via timing
-    let acc = 1; // non-zero because lengths differ
-    for (let i = 0; i < a.length; i++) {
-      acc |= a.charCodeAt(i) ^ a.charCodeAt(i);
-    }
-    return acc === 0;
-  }
-  let acc = 0;
-  for (let i = 0; i < a.length; i++) {
-    acc |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  const maxLen = Math.max(a.length, b.length);
+  let acc = a.length ^ b.length; // non-zero if lengths differ
+  for (let i = 0; i < maxLen; i++) {
+    acc |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
   }
   return acc === 0;
 }

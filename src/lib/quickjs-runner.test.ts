@@ -57,6 +57,7 @@ vi.mock('quickjs-emscripten', () => ({
 
 import {
   createQuickJSExecutor,
+  escapeSourceForTemplate,
   type RPCCallback,
   type QuickJSExecutionResult,
 } from './quickjs-runner';
@@ -336,5 +337,112 @@ describe('quickjs-runner', () => {
 
     expect(result.ok).toBe(true);
     expect(result.result).toBe(42);
+  });
+
+  describe('escapeSourceForTemplate', () => {
+    it('escapes backticks in source', () => {
+      const source = 'var s = `hello`;';
+      const escaped = escapeSourceForTemplate(source);
+      expect(escaped).toBe('var s = \\`hello\\`;');
+      // The escaped form should not contain unescaped backticks
+      expect(escaped).not.toMatch(/(?<!\\)`/);
+    });
+
+    it('escapes template literal interpolation syntax', () => {
+      const source = 'var s = `value is ${x}`;';
+      const escaped = escapeSourceForTemplate(source);
+      expect(escaped).toBe('var s = \\`value is \\${x}\\`;');
+      // Should not contain unescaped ${ sequences
+      expect(escaped).not.toMatch(/(?<!\\)\$\{/);
+    });
+
+    it('escapes backslashes in source', () => {
+      const source = 'var re = /a\\nb/;';
+      const escaped = escapeSourceForTemplate(source);
+      expect(escaped).toBe('var re = /a\\\\nb/;');
+    });
+
+    it('handles combined backticks, template expressions, and backslashes', () => {
+      const source = 'var s = `path: C:\\\\Users\\\\${name}`;';
+      const escaped = escapeSourceForTemplate(source);
+      // Backslashes doubled, backticks escaped, ${ escaped
+      expect(escaped).toBe('var s = \\`path: C:\\\\\\\\Users\\\\\\\\\\${name}\\`;');
+      // Key: no unescaped backticks or ${ in result
+      expect(escaped).not.toMatch(/(?<!\\)`/);
+      expect(escaped).not.toMatch(/(?<!\\)\$\{/);
+    });
+
+    it('leaves normal source unchanged', () => {
+      const source = 'async function run(page) { return 42; }';
+      const escaped = escapeSourceForTemplate(source);
+      expect(escaped).toBe(source);
+    });
+  });
+
+  describe('script interpolation safety', () => {
+    it('wrapper correctly contains scripts with backticks', async () => {
+      const sourceWithBackticks = 'async function run() { var s = `hello`; return s; }';
+      await createQuickJSExecutor(
+        sourceWithBackticks,
+        'task-1',
+        {},
+        mockRpcCallback,
+      );
+
+      const evalCall = (mockContext.evalCodeAsync.mock.calls as any[])[0][0] as string;
+      // The wrapper should contain the escaped backticks
+      expect(evalCall).toContain('\\`hello\\`');
+      // The wrapper should still be valid (starts with IIFE, ends properly)
+      expect(evalCall).toContain('(async function()');
+      expect(evalCall.trim().endsWith('})()'));
+    });
+
+    it('wrapper correctly contains scripts with template literal syntax', async () => {
+      const sourceWithTemplate = 'async function run() { var x = 1; var s = `val: ${x}`; return s; }';
+      await createQuickJSExecutor(
+        sourceWithTemplate,
+        'task-1',
+        {},
+        mockRpcCallback,
+      );
+
+      const evalCall = (mockContext.evalCodeAsync.mock.calls as any[])[0][0] as string;
+      // The template expression should be escaped
+      expect(evalCall).toContain('\\${x}');
+      // The wrapper IIFE structure should remain intact
+      expect(evalCall).toContain('(async function()');
+      expect(evalCall.trim().endsWith('})()'));
+    });
+
+    it('wrapper correctly contains scripts with backslashes', async () => {
+      const sourceWithBackslash = 'async function run() { return "line1\\nline2"; }';
+      await createQuickJSExecutor(
+        sourceWithBackslash,
+        'task-1',
+        {},
+        mockRpcCallback,
+      );
+
+      const evalCall = (mockContext.evalCodeAsync.mock.calls as any[])[0][0] as string;
+      // Backslash should be escaped
+      expect(evalCall).toContain('\\\\n');
+      expect(evalCall).toContain('(async function()');
+    });
+
+    it('existing wrapper tests still pass after escaping', async () => {
+      // A normal script without special characters should work identically
+      await createQuickJSExecutor(
+        'async function run(page, context) { return { hello: "world" }; }',
+        'task-1',
+        {},
+        mockRpcCallback,
+      );
+
+      const evalCall = (mockContext.evalCodeAsync.mock.calls as any[])[0][0] as string;
+      // Normal source should appear as-is (no special chars to escape)
+      expect(evalCall).toContain('async function run(page, context) { return { hello: "world" }; }');
+      expect(evalCall).toContain('(async function()');
+      expect(evalCall).toContain('JSON.parse(__stateJson)');
+    });
   });
 });

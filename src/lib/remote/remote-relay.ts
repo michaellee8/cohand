@@ -1,5 +1,5 @@
 import { CDPManager } from '../cdp';
-import { isDomainAllowed } from '../security/domain-guard';
+import { isDomainAllowed, isSensitivePage } from '../security/domain-guard';
 
 export interface RemoteCommand {
   id: number;
@@ -121,7 +121,9 @@ const ALLOWED_CDP_METHODS = new Set([
   // Accessibility
   'Accessibility.queryAXTree',
   'Accessibility.getFullAXTree',
-  // Input (mouse/touch allowed, keyboard blocked separately)
+  // Input — mouse/touch only; keyboard methods (Input.dispatchKeyEvent,
+  // Input.insertText, Input.imeSetComposition) are intentionally excluded
+  // to prevent remote text injection.
   'Input.dispatchMouseEvent',
   'Input.dispatchTouchEvent',
   // Page info
@@ -170,6 +172,15 @@ export async function executeRemoteCommand(
       };
     }
 
+    // Sensitive page check — block CDP on settings, login, payment pages etc.
+    if (isSensitivePage(tabUrl)) {
+      return {
+        id: command.id,
+        ok: false,
+        error: `Access denied: sensitive page path`,
+      };
+    }
+
     // CDP method whitelist — only allow safe methods, reject everything else
     if (!ALLOWED_CDP_METHODS.has(command.method)) {
       return {
@@ -179,21 +190,7 @@ export async function executeRemoteCommand(
       };
     }
 
-    // Input lock: block text input and form submission unless explicitly unlocked
-    const blockedInputMethods = [
-      'Input.dispatchKeyEvent',
-      'Input.insertText',
-      'Input.imeSetComposition',
-    ];
-    if (blockedInputMethods.includes(command.method)) {
-      return {
-        id: command.id,
-        ok: false,
-        error: 'Text input blocked in remote mode. Use unlock-input command first.',
-      };
-    }
-
-    // Block Page.navigate to sensitive URLs
+    // Block Page.navigate to sensitive or disallowed URLs
     if (command.method === 'Page.navigate' && command.params?.url) {
       const targetUrl = String(command.params.url);
       if (isSensitiveScheme(targetUrl)) {
@@ -201,6 +198,13 @@ export async function executeRemoteCommand(
           id: command.id,
           ok: false,
           error: `Navigation to sensitive URL blocked: ${targetUrl}`,
+        };
+      }
+      if (!isDomainAllowed(targetUrl, allowedDomains)) {
+        return {
+          id: command.id,
+          ok: false,
+          error: `Navigation to disallowed domain blocked`,
         };
       }
     }

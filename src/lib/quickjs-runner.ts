@@ -28,6 +28,21 @@ export interface QuickJSExecutionResult {
 }
 
 /**
+ * Escape user script source so it can be safely interpolated into
+ * a JavaScript template literal without breaking the wrapper IIFE.
+ *
+ * Backticks, `${` sequences, and backslashes are escaped to prevent
+ * the user source from closing the template literal or injecting
+ * template expressions.
+ */
+export function escapeSourceForTemplate(source: string): string {
+  return source
+    .replace(/\\/g, '\\\\')
+    .replace(/`/g, '\\`')
+    .replace(/\$\{/g, '\\${');
+}
+
+/**
  * The wrapper script that runs INSIDE QuickJS.
  * It creates page/context objects from the injected __hostCall and __stateJson globals,
  * then calls the user's run(page, context) function.
@@ -35,6 +50,7 @@ export interface QuickJSExecutionResult {
  * This script has NO access to browser globals — only what we explicitly inject.
  */
 function buildWrapperScript(source: string, taskId: string): string {
+  const escapedSource = escapeSourceForTemplate(source);
   return `
 (async function() {
   // Parse the injected state
@@ -119,7 +135,7 @@ function buildWrapperScript(source: string, taskId: string): string {
   };
 
   // User script defines run(page, context)
-  ${source}
+  ${escapedSource}
 
   var result = undefined;
   if (typeof run === 'function') {

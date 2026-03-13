@@ -10,6 +10,7 @@
 
 import { CLICK_DEDUP_MS } from '../../constants';
 import type { RawRecordingAction } from '../../types/recording';
+import { isSensitiveInput } from '../security/sensitive-input';
 
 // ---------------------------------------------------------------------------
 // A11y subtree builder (lightweight, depth-limited)
@@ -110,32 +111,6 @@ function buildCssSelector(el: Element): string {
   return tag;
 }
 
-// ---------------------------------------------------------------------------
-// Sensitive-input detection
-// ---------------------------------------------------------------------------
-
-const SENSITIVE_AUTOCOMPLETE = new Set([
-  'cc-number', 'cc-csc', 'cc-exp',
-  'new-password', 'current-password', 'one-time-code',
-]);
-
-const SENSITIVE_NAME_PATTERN =
-  /password|passwd|pin|cvv|cvc|ssn|otp|mfa|totp|secret|token/i;
-
-function isSensitiveInput(el: Element): boolean {
-  if (el instanceof HTMLInputElement && el.type === 'password') return true;
-
-  const autocomplete = el.getAttribute('autocomplete') || '';
-  for (const token of autocomplete.split(/\s+/)) {
-    if (SENSITIVE_AUTOCOMPLETE.has(token)) return true;
-  }
-
-  const name = el.getAttribute('name') || '';
-  const id = el.getAttribute('id') || '';
-  if (SENSITIVE_NAME_PATTERN.test(name) || SENSITIVE_NAME_PATTERN.test(id)) return true;
-
-  return false;
-}
 
 // ---------------------------------------------------------------------------
 // Module state
@@ -382,3 +357,6 @@ export function deactivate(): void {
   lastClickTarget = null;
   lastClickTime = 0;
 }
+
+// Test-only exports
+export { collectElementMeta as _collectElementMeta };
