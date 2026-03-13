@@ -23,10 +23,7 @@ export default defineConfig({
     sandbox: {
       pages: ['sandbox.html'],
     },
-    externally_connectable: {
-      ids: [], // Populate with allowed extension IDs for remote mode
-    },
-    web_accessible_resources: [{
+web_accessible_resources: [{
       resources: ['oauth-callback.html'],
       matches: ['http://localhost/*'],
     }],

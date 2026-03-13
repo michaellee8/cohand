@@ -33,7 +33,6 @@ export class CDPManager {
       // Enable required CDP domains
       await this.send(tabId, 'DOM.enable');
       await this.send(tabId, 'Page.enable');
-      await this.send(tabId, 'Input.enable');
     } catch (err) {
       // Partial enable failure — clean up
       try {

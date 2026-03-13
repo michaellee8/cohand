@@ -38,7 +38,7 @@ describe('attach', () => {
     expect(mockDebugger.attach).toHaveBeenCalledWith({ tabId: 1 }, '1.3');
   });
 
-  it('enables DOM, Page, and Input domains', async () => {
+  it('enables DOM and Page domains', async () => {
     await cdp.attach(1);
     expect(mockDebugger.sendCommand).toHaveBeenCalledWith(
       { tabId: 1 },
@@ -48,11 +48,6 @@ describe('attach', () => {
     expect(mockDebugger.sendCommand).toHaveBeenCalledWith(
       { tabId: 1 },
       'Page.enable',
-      undefined,
-    );
-    expect(mockDebugger.sendCommand).toHaveBeenCalledWith(
-      { tabId: 1 },
-      'Input.enable',
       undefined,
     );
   });
@@ -109,7 +104,7 @@ describe('send', () => {
     mockDebugger.sendCommand.mockResolvedValueOnce(mockResult);
 
     await cdp.attach(1);
-    // clear the calls from attach (DOM.enable, Page.enable, Input.enable)
+    // clear the calls from attach (DOM.enable, Page.enable)
     mockDebugger.sendCommand.mockClear();
     mockDebugger.sendCommand.mockResolvedValueOnce(mockResult);
 
