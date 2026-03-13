@@ -512,7 +512,69 @@ test.describe('Live Task Creation & Execution', () => {
     await page.close();
   });
 
-  // ── Test 8: Run twice and verify both runs recorded ───────────────────────
+  // ── Test 8: Domain permissions in wizard ────────────────────────────────
+
+  test('wizard domain step allows adding and removing domains', async ({
+    openSidePanel,
+    context,
+  }) => {
+    const mockPage = await context.newPage();
+    await mockPage.goto('http://localhost:5199', { waitUntil: 'domcontentloaded' });
+    await ensureMockPageActive(mockPage);
+
+    const page = await openSidePanel();
+    const sp = new SidePanel(page);
+
+    await importAuthViaUI(page, authJsonString);
+    await navigateToChat(page, sp);
+    await sp.navigateToTasks();
+    await page.waitForTimeout(1_000);
+
+    // Start wizard
+    await page.locator('button').filter({ hasText: '+ New Task' }).click();
+    await page.waitForTimeout(300);
+
+    // Step 1: Describe
+    await expect(page.getByText('Step 1: Describe')).toBeVisible();
+    await page.locator('textarea').fill('Domain permissions test task');
+
+    const nextBtn = page.locator('button').filter({ hasText: 'Next' });
+    await nextBtn.click();
+    await page.waitForTimeout(300);
+
+    // Step 2: Domains
+    await expect(page.getByText('Step 2: Domains')).toBeVisible();
+
+    // Add a custom domain
+    const domainInput = page.locator('input[placeholder="example.com"]');
+    await domainInput.fill('test-domain.com');
+    await page.locator('button').filter({ hasText: 'Add' }).click();
+    await page.waitForTimeout(300);
+
+    // Verify the domain appears in the list
+    await expect(page.locator('.font-mono').filter({ hasText: 'test-domain.com' })).toBeVisible();
+
+    // Add another domain
+    await domainInput.fill('another-domain.com');
+    await page.locator('button').filter({ hasText: 'Add' }).click();
+    await page.waitForTimeout(300);
+
+    await expect(page.locator('.font-mono').filter({ hasText: 'another-domain.com' })).toBeVisible();
+
+    // The Next button should be enabled (at least one domain)
+    await expect(nextBtn).not.toBeDisabled();
+
+    // Check that localhost may have been auto-detected
+    const pageText = await page.locator('#root').textContent() ?? '';
+    // We should have at least our two added domains visible
+    expect(pageText).toContain('test-domain.com');
+    expect(pageText).toContain('another-domain.com');
+
+    await mockPage.close();
+    await page.close();
+  });
+
+  // ── Test 9: Run twice and verify both runs recorded ───────────────────────
 
   test('executing task twice records both runs in history', async ({
     openSidePanel,

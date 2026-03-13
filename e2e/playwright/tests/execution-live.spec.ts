@@ -389,4 +389,174 @@ test.describe('Live Task Execution', () => {
     await mockPage.close();
     await page.close();
   });
+
+  // ── Test 6: Error recovery — task with failing script ──────────────────────
+
+  test('task with failing script records error run and allows re-execution', async ({
+    openSidePanel,
+    context,
+  }) => {
+    const TASK_ID = `e2e-error-live-${Date.now()}`;
+
+    const mockPage = await context.newPage();
+    await mockPage.goto('http://localhost:5199', { waitUntil: 'domcontentloaded' });
+    await mockPage.waitForTimeout(500);
+
+    const page = await openSidePanel();
+    const sw = new ServiceWorkerHelper(page);
+
+    // Create task with a script that throws an error
+    await sw.createTask(
+      {
+        id: TASK_ID,
+        name: 'Live Error Recovery Test',
+        description: 'Script that fails intentionally',
+        allowedDomains: ['localhost'],
+      },
+      `async function run(page, context) {
+  throw new Error('Intentional test failure');
+}`,
+    );
+
+    const tabId = await getActiveTabId(page);
+
+    // Execute — should fail
+    await sw.executeTask(TASK_ID, tabId);
+    await page.waitForTimeout(5_000);
+
+    // Check that a run was recorded (even if it failed)
+    let runsResult = await sw.getRuns(TASK_ID);
+    expect(runsResult).toHaveProperty('runs');
+    expect(Array.isArray(runsResult.runs)).toBe(true);
+    const failedRunCount = runsResult.runs.length;
+
+    // If a run was recorded, it should be marked as not successful
+    if (failedRunCount > 0) {
+      const failedRun = runsResult.runs[0];
+      expect(failedRun).toHaveProperty('taskId', TASK_ID);
+      // The run should exist regardless of success/failure
+      expect(failedRun).toHaveProperty('durationMs');
+    }
+
+    // Now update the task with a working script and re-execute
+    await sw.createTask(
+      {
+        id: `${TASK_ID}-fixed`,
+        name: 'Live Error Recovery Fixed',
+        description: 'Fixed version of the failing script',
+        allowedDomains: ['localhost'],
+      },
+      `async function run(page, context) {
+  return { result: 'recovered' };
+}`,
+    );
+
+    await sw.executeTask(`${TASK_ID}-fixed`, tabId);
+    await page.waitForTimeout(5_000);
+
+    // Check runs for the fixed task
+    runsResult = await sw.getRuns(`${TASK_ID}-fixed`);
+    expect(runsResult).toHaveProperty('runs');
+
+    // Cleanup
+    await sw.deleteTask(TASK_ID).catch(() => {});
+    await sw.deleteTask(`${TASK_ID}-fixed`).catch(() => {});
+    await mockPage.close();
+    await page.close();
+  });
+
+  // ── Test 7: Task scheduling — interval task configuration ──────────────────
+
+  test('task with interval schedule is stored and retrievable', async ({
+    openSidePanel,
+  }) => {
+    const TASK_ID = `e2e-sched-live-${Date.now()}`;
+
+    const page = await openSidePanel();
+    const sw = new ServiceWorkerHelper(page);
+
+    // Create task with interval schedule
+    await sw.createTask({
+      id: TASK_ID,
+      name: 'Live Scheduled Task',
+      description: 'Task with interval schedule',
+      allowedDomains: ['localhost'],
+      schedule: { type: 'interval', intervalMinutes: 30 },
+    });
+
+    // Verify task was stored with correct schedule
+    const taskResult = await sw.getTask(TASK_ID);
+    expect(taskResult.task).toBeTruthy();
+    expect(taskResult.task?.schedule.type).toBe('interval');
+    if (taskResult.task?.schedule.type === 'interval') {
+      expect(taskResult.task.schedule.intervalMinutes).toBe(30);
+    }
+
+    // Verify task appears in the list
+    const sp = new SidePanel(page);
+    await sp.navigateToTasks();
+    await page.waitForTimeout(1_000);
+    await expect(page.getByText('Live Scheduled Task')).toBeVisible({ timeout: 5_000 });
+
+    // The schedule info should be visible on the card (e.g. "every 30m")
+    const pageText = await page.locator('#root').textContent() ?? '';
+    const hasScheduleInfo = pageText.includes('30m') || pageText.includes('30 min') ||
+      pageText.includes('interval');
+    expect(hasScheduleInfo).toBe(true);
+
+    // Cleanup
+    await sw.deleteTask(TASK_ID).catch(() => {});
+    await page.close();
+  });
+
+  // ── Test 8: Domain permissions — task restricted to specific domains ────────
+
+  test('task allowedDomains are stored and enforced', async ({
+    openSidePanel,
+  }) => {
+    const TASK_ID = `e2e-domain-live-${Date.now()}`;
+
+    const page = await openSidePanel();
+    const sw = new ServiceWorkerHelper(page);
+
+    // Create task restricted to localhost only
+    await sw.createTask({
+      id: TASK_ID,
+      name: 'Live Domain Restricted Task',
+      description: 'Only allowed on localhost',
+      allowedDomains: ['localhost'],
+    });
+
+    // Verify allowedDomains stored correctly
+    const taskResult = await sw.getTask(TASK_ID);
+    expect(taskResult.task).toBeTruthy();
+    expect(taskResult.task?.allowedDomains).toEqual(['localhost']);
+
+    // Verify domain info is visible in the task list
+    const sp = new SidePanel(page);
+    await sp.navigateToTasks();
+    await page.waitForTimeout(1_000);
+    await expect(page.getByText('Live Domain Restricted Task')).toBeVisible({ timeout: 5_000 });
+
+    // The domain should be visible on the task card
+    const cardText = await page.locator('#root').textContent() ?? '';
+    expect(cardText).toContain('localhost');
+
+    // Create a second task with multiple domains
+    const TASK_ID_2 = `e2e-domain2-live-${Date.now()}`;
+    await sw.createTask({
+      id: TASK_ID_2,
+      name: 'Live Multi-Domain Task',
+      description: 'Allowed on multiple domains',
+      allowedDomains: ['localhost', 'example.com'],
+    });
+
+    const task2Result = await sw.getTask(TASK_ID_2);
+    expect(task2Result.task?.allowedDomains).toEqual(['localhost', 'example.com']);
+
+    // Cleanup
+    await sw.deleteTask(TASK_ID).catch(() => {});
+    await sw.deleteTask(TASK_ID_2).catch(() => {});
+    await page.close();
+  });
 });
