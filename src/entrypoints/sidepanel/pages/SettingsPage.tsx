@@ -150,6 +150,9 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                 >
                   Login with ChatGPT
                 </button>
+                <p className="text-xs text-gray-400 mt-1 text-center">
+                  If you see ERR_BLOCKED_BY_CLIENT, click Reload in Chrome and try again.
+                </p>
 
                 <div className="flex items-center gap-2 text-xs text-gray-400">
                   <div className="flex-1 border-t border-gray-200" />

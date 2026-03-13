@@ -4,3 +4,4 @@ dist/
 .wxt/
 *.tsbuildinfo
 references/
+.DS_Store

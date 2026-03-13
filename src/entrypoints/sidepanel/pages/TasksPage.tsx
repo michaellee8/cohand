@@ -1,16 +1,28 @@
 import { useEffect, useState } from 'react';
 import { useTasksStore } from '../stores/tasks-store';
+import { useSettingsStore } from '../stores/settings-store';
 import { useWizardStore } from '../stores/wizard-store';
 import { TaskCard } from '../components/TaskCard';
 import { TaskDetail } from '../components/TaskDetail';
 import { NotificationFeed } from '../components/NotificationFeed';
 import { CreateTaskWizard } from '../components/CreateTaskWizard';
 
-export function TasksPage() {
+interface TasksPageProps {
+  onOpenSettings: () => void;
+}
+
+export function TasksPage({ onOpenSettings }: TasksPageProps) {
   const { tasks, selectedTaskId, runs, notifications, loading,
     fetchTasks, selectTask, runTask, deleteTask, markNotificationRead } = useTasksStore();
+  const { settings, hasApiKey, codexConnected } = useSettingsStore();
   const [showWizard, setShowWizard] = useState(false);
   const resetWizard = useWizardStore(state => state.reset);
+
+  const llmConfigured = settings
+    ? settings.llmProvider === 'chatgpt-subscription'
+      ? codexConnected
+      : hasApiKey
+    : true;
 
   useEffect(() => {
     useTasksStore.getState().fetchTasks();
@@ -47,6 +59,17 @@ export function TasksPage() {
 
   return (
     <div className="flex flex-col h-full">
+      {!llmConfigured && (
+        <div className="mx-4 mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center justify-between">
+          <p className="text-sm text-yellow-800">No LLM configured. Set up a provider to run tasks.</p>
+          <button
+            onClick={onOpenSettings}
+            className="bg-blue-500 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-blue-600 transition-colors shrink-0 ml-3"
+          >
+            Go to Settings
+          </button>
+        </div>
+      )}
       <div className="p-4 flex items-center justify-between">
         <h2 className="text-base font-semibold">Tasks</h2>
         <button

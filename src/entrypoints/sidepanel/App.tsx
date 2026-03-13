@@ -1,6 +1,7 @@
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { TabBar, type Tab } from './components/TabBar';
 import { useTasksStore } from './stores/tasks-store';
+import { useSettingsStore } from './stores/settings-store';
 
 const ChatPage = lazy(() => import('./pages/ChatPage').then(m => ({ default: m.ChatPage })));
 const TasksPage = lazy(() => import('./pages/TasksPage').then(m => ({ default: m.TasksPage })));
@@ -48,6 +49,7 @@ export function App() {
 
   useEffect(() => {
     useTasksStore.getState().fetchUnreadCount();
+    useSettingsStore.getState().load();
   }, []);
 
   if (showSettings) {
@@ -71,8 +73,8 @@ export function App() {
         />
         <main className="flex-1 overflow-y-auto">
           <Suspense fallback={<div className="flex items-center justify-center h-full text-gray-400 text-sm">Loading...</div>}>
-            {activeTab === 'chat' && <ChatPage />}
-            {activeTab === 'tasks' && <TasksPage />}
+            {activeTab === 'chat' && <ChatPage onOpenSettings={() => setShowSettings(true)} />}
+            {activeTab === 'tasks' && <TasksPage onOpenSettings={() => setShowSettings(true)} />}
           </Suspense>
         </main>
       </div>
