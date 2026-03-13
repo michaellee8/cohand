@@ -364,15 +364,14 @@ describe('prompt constants', () => {
   });
 
   it('EXPLORER_SYSTEM_PROMPT lists available page methods', () => {
-    expect(EXPLORER_SYSTEM_PROMPT).toContain('page.goto');
-    expect(EXPLORER_SYSTEM_PROMPT).toContain('page.click');
-    expect(EXPLORER_SYSTEM_PROMPT).toContain('page.fill');
-    expect(EXPLORER_SYSTEM_PROMPT).toContain('page.type');
-    expect(EXPLORER_SYSTEM_PROMPT).toContain('page.scroll');
-    expect(EXPLORER_SYSTEM_PROMPT).toContain('page.locator');
-    expect(EXPLORER_SYSTEM_PROMPT).toContain('getByRole');
-    expect(EXPLORER_SYSTEM_PROMPT).toContain('getByText');
-    expect(EXPLORER_SYSTEM_PROMPT).toContain('getByLabel');
+    expect(EXPLORER_SYSTEM_PROMPT).toContain('goto(');
+    expect(EXPLORER_SYSTEM_PROMPT).toContain('click(');
+    expect(EXPLORER_SYSTEM_PROMPT).toContain('fill(');
+    expect(EXPLORER_SYSTEM_PROMPT).toContain('scroll(');
+    expect(EXPLORER_SYSTEM_PROMPT).toContain('locator(');
+    expect(EXPLORER_SYSTEM_PROMPT).toContain('getByRole(');
+    expect(EXPLORER_SYSTEM_PROMPT).toContain('getByText(');
+    expect(EXPLORER_SYSTEM_PROMPT).toContain('getByLabel(');
   });
 
   it('EXPLORER_SYSTEM_PROMPT lists blocked APIs', () => {

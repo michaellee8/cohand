@@ -301,7 +301,7 @@ describe('review prompts content', () => {
 
   it('DATA_FLOW_REVIEW_PROMPT focuses on data flow', () => {
     expect(DATA_FLOW_REVIEW_PROMPT).toContain('DATA FLOW');
-    expect(DATA_FLOW_REVIEW_PROMPT).toContain('exfiltrated');
+    expect(DATA_FLOW_REVIEW_PROMPT).toContain('EXFILTRATION');
   });
 
   it('CAPABILITY_REVIEW_PROMPT focuses on capabilities', () => {

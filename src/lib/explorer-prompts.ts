@@ -9,28 +9,41 @@ async function run(page, context) {
 }
 \`\`\`
 
-Available page methods:
-- page.goto(url) - Navigate to URL
-- page.click(selector) - Click an element
-- page.fill(selector, text) - Clear and type into an input
-- page.type(selector, text) - Append text to an input
-- page.scroll(distance) - Scroll by pixel distance
-- page.waitForSelector(selector, { timeout? }) - Wait for element
-- page.waitForLoadState(state) - Wait for page state ('domcontentloaded', 'load')
-- page.url() - Get current URL
-- page.title() - Get page title
-- page.getByRole(role, { name? }) - Find by ARIA role
-- page.getByText(text) - Find by text content
-- page.getByLabel(text) - Find by label
-- page.locator(selector) - CSS selector locator, supports:
-  .click(), .fill(text), .type(text), .textContent(), .getAttribute(name),
-  .boundingBox(), .isVisible(), .count(), .all()
-  getAttribute whitelist: href, aria-label, role, title, alt, data-testid
+Available API (TypeScript definitions):
 
-Available context:
-- context.url - Target URL for the task
-- context.state - Persistent JSON state (read/write between runs)
-- context.notify(message) - Send notification to user
+interface Page {
+  goto(url: string): Promise<void>;
+  click(selector: string): Promise<void>;
+  fill(selector: string, text: string): Promise<void>;
+  type(selector: string, text: string): Promise<void>;
+  scroll(distance: number): Promise<void>;
+  waitForSelector(selector: string, options?: { timeout?: number }): Promise<void>;
+  waitForLoadState(state: 'domcontentloaded' | 'load'): Promise<void>;
+  url(): Promise<string>;
+  title(): Promise<string>;
+  getByRole(role: string, options?: { name?: string }): Locator;
+  getByText(text: string): Locator;
+  getByLabel(text: string): Locator;
+  locator(selector: string): Locator;
+}
+
+interface Locator {
+  click(): Promise<void>;
+  fill(text: string): Promise<void>;
+  type(text: string): Promise<void>;
+  textContent(): Promise<string | null>;  // max 500 chars per call, 50KB cumulative
+  getAttribute(name: 'href' | 'aria-label' | 'role' | 'title' | 'alt' | 'data-testid'): Promise<string | null>;
+  boundingBox(): Promise<{ x: number; y: number; width: number; height: number } | null>;
+  isVisible(): Promise<boolean>;
+  count(): Promise<number>;
+  all(): Promise<Locator[]>;
+}
+
+interface Context {
+  url: string;                            // target URL for the task
+  state: Record<string, unknown>;         // persistent JSON state, direct property access
+  notify(message: string): Promise<void>; // send notification to user
+}
 
 Rules:
 1. Use await for all page method calls
