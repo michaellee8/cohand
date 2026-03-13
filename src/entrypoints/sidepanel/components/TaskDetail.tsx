@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Task, ScriptRun, ScriptVersion, TaskState } from '../../../types';
 
 // ---------------------------------------------------------------------------
@@ -101,10 +102,11 @@ function CollapsibleSection({
 }
 
 function DiffView({ oldSource, newSource }: { oldSource: string; newSource: string }) {
+  const { t } = useTranslation();
   const lines = useMemo(() => computeLineDiff(oldSource, newSource), [oldSource, newSource]);
 
   if (oldSource === newSource) {
-    return <p className="text-xs text-gray-400 italic py-2">No differences</p>;
+    return <p className="text-xs text-gray-400 italic py-2">{t('taskDetail.noDifferences')}</p>;
   }
 
   return (
@@ -148,6 +150,7 @@ function ScriptVersionsSection({
   activeVersion: number;
   onRevert: (version: number) => void;
 }) {
+  const { t } = useTranslation();
   const [selectedVersionNum, setSelectedVersionNum] = useState<number | null>(null);
   const sorted = useMemo(
     () => [...versions].sort((a, b) => b.version - a.version),
@@ -160,7 +163,7 @@ function ScriptVersionsSection({
   return (
     <div className="space-y-2">
       {sorted.length === 0 ? (
-        <p className="text-xs text-gray-400">No script versions found</p>
+        <p className="text-xs text-gray-400">{t('taskDetail.noVersions')}</p>
       ) : (
         <div className="space-y-1">
           {sorted.map(sv => {
@@ -183,7 +186,7 @@ function ScriptVersionsSection({
                     <span className="font-medium">v{sv.version}</span>
                     {isActive && (
                       <span className="text-[10px] bg-blue-500 text-white rounded px-1.5 py-0.5">
-                        active
+                        {t('taskDetail.active')}
                       </span>
                     )}
                     <span className="text-gray-400">{sv.generatedBy}</span>
@@ -205,7 +208,7 @@ function ScriptVersionsSection({
                       onClick={(e) => { e.stopPropagation(); onRevert(sv.version); }}
                       className="text-xs bg-amber-500 text-white rounded px-2.5 py-1 hover:bg-amber-600 transition-colors"
                     >
-                      Revert to v{sv.version}
+                      {t('taskDetail.revertTo', { version: sv.version })}
                     </button>
                   </div>
                 )}
@@ -231,8 +234,10 @@ function ScriptVersionsSection({
 // ---------------------------------------------------------------------------
 
 function StateInspectorSection({ taskState }: { taskState?: TaskState }) {
+  const { t } = useTranslation();
+
   if (!taskState) {
-    return <p className="text-xs text-gray-400">No state recorded yet</p>;
+    return <p className="text-xs text-gray-400">{t('taskDetail.noState')}</p>;
   }
 
   const stateJson = JSON.stringify(taskState.state, null, 2);
@@ -250,7 +255,7 @@ function StateInspectorSection({ taskState }: { taskState?: TaskState }) {
     <div className="space-y-2">
       <div className="flex items-center justify-between text-xs text-gray-500">
         <span>
-          Last updated:{' '}
+          {t('taskDetail.lastUpdated')}{' '}
           {new Date(taskState.updatedAt).toLocaleString()}
         </span>
         <span className="flex items-center gap-1.5">
@@ -297,6 +302,8 @@ export function TaskDetail({
   onRevertVersion,
   onUpdateTask,
 }: TaskDetailProps) {
+  const { t } = useTranslation();
+
   const handleRevert = (version: number) => {
     if (onRevertVersion) {
       onRevertVersion(task.id, version);
@@ -313,6 +320,10 @@ export function TaskDetail({
     }
   };
 
+  const scheduleDisplay = task.schedule.type === 'interval'
+    ? t('taskDetail.scheduleInterval', { minutes: task.schedule.intervalMinutes })
+    : t('taskDetail.scheduleManual');
+
   return (
     <div className="p-4 space-y-4 overflow-y-auto h-full">
       <div className="flex items-center justify-between">
@@ -327,12 +338,12 @@ export function TaskDetail({
       <p className="text-sm text-gray-600">{task.description}</p>
 
       <div className="space-y-1">
-        <h3 className="text-sm font-medium">Details</h3>
+        <h3 className="text-sm font-medium">{t('taskDetail.details')}</h3>
         <div className="text-xs text-gray-500 space-y-0.5">
-          <p>Domains: {task.allowedDomains.join(', ')}</p>
-          <p>Active version: v{task.activeScriptVersion}</p>
-          <p>Schedule: {task.schedule.type === 'interval' ? `Every ${task.schedule.intervalMinutes} minutes` : 'Manual'}</p>
-          <p>Created: {new Date(task.createdAt).toLocaleDateString()}</p>
+          <p>{t('taskDetail.domains', { domains: task.allowedDomains.join(', ') })}</p>
+          <p>{t('taskDetail.activeVersion', { version: task.activeScriptVersion })}</p>
+          <p>{t('taskDetail.schedule', { schedule: scheduleDisplay })}</p>
+          <p>{t('taskDetail.created', { date: new Date(task.createdAt).toLocaleDateString() })}</p>
         </div>
       </div>
 
@@ -345,16 +356,16 @@ export function TaskDetail({
             onChange={handleToggleNotify}
             className="rounded"
           />
-          <span className="text-gray-700">Enable notifications</span>
+          <span className="text-gray-700">{t('taskDetail.enableNotifications')}</span>
         </label>
         <p className="text-xs text-gray-400 ml-6">
-          Receive notifications when this task sends alerts.
+          {t('taskDetail.notificationHint')}
         </p>
       </div>
 
       {/* Script Versions */}
       <CollapsibleSection
-        title="Script Versions"
+        title={t('taskDetail.scriptVersions')}
         badge={scriptVersions.length}
         defaultOpen={false}
       >
@@ -366,25 +377,25 @@ export function TaskDetail({
       </CollapsibleSection>
 
       {/* State Inspector */}
-      <CollapsibleSection title="State Inspector" defaultOpen={false}>
+      <CollapsibleSection title={t('taskDetail.stateInspector')} defaultOpen={false}>
         <StateInspectorSection taskState={taskState} />
       </CollapsibleSection>
 
       {/* Recent Runs */}
       <CollapsibleSection
-        title="Recent Runs"
+        title={t('taskDetail.recentRuns')}
         badge={runs.length}
         defaultOpen={true}
       >
         {runs.length === 0 ? (
-          <p className="text-xs text-gray-400">No runs yet</p>
+          <p className="text-xs text-gray-400">{t('taskDetail.noRuns')}</p>
         ) : (
           <div className="space-y-1">
             {runs.map(run => (
               <div key={run.id} className="text-xs rounded bg-gray-50">
                 <div className="flex items-center gap-2 p-1.5">
                   <span className={run.success ? 'text-green-500' : 'text-red-500'}>
-                    {run.success ? 'Pass' : 'Fail'}
+                    {run.success ? t('taskDetail.pass') : t('taskDetail.fail')}
                   </span>
                   <span className="text-gray-400">v{run.version}</span>
                   <span className="text-gray-400">{run.durationMs}ms</span>
@@ -408,12 +419,12 @@ export function TaskDetail({
       <button
         className="mt-4 flex items-center gap-1.5 rounded border border-red-300 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 transition-colors"
         onClick={() => {
-          if (window.confirm(`Delete task "${task.name}"? This cannot be undone.`)) {
+          if (window.confirm(t('taskDetail.deleteConfirm', { name: task.name }))) {
             onDelete(task.id);
           }
         }}
       >
-        Delete Task
+        {t('taskDetail.deleteTask')}
       </button>
     </div>
   );

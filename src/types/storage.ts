@@ -18,7 +18,7 @@ export interface Settings {
   llmModel: string;
   llmBaseUrl?: string;
   yoloMode: boolean;
-  language: string;
+  language: 'en' | 'zh-TW' | 'zh-CN';
 }
 
 export interface EncryptedTokens {

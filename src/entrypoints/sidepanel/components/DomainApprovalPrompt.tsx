@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import type { DomainApprovalRequest } from '../stores/domain-session-store';
 
 interface DomainApprovalPromptProps {
@@ -13,6 +14,8 @@ export function DomainApprovalPrompt({
   onApprove,
   onDeny,
 }: DomainApprovalPromptProps) {
+  const { t } = useTranslation();
+
   if (request.status === 'approved') {
     return (
       <div className="flex justify-start mb-3">
@@ -22,8 +25,8 @@ export function DomainApprovalPrompt({
               <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
             </svg>
             <span className="text-xs">
-              Access to <span className="font-medium">{request.domain}</span> granted
-              {yoloMode && <span className="ml-1 text-amber-600">(YOLO mode -- auto-approved)</span>}
+              {t('domain.accessGranted', { domain: request.domain })}
+              {yoloMode && <span className="ml-1 text-amber-600">{t('domain.autoApproved')}</span>}
             </span>
           </div>
         </div>
@@ -40,7 +43,7 @@ export function DomainApprovalPrompt({
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
             </svg>
             <span className="text-xs">
-              Access to <span className="font-medium">{request.domain}</span> denied. Script generation cancelled.
+              {t('domain.accessDenied', { domain: request.domain })}
             </span>
           </div>
         </div>
@@ -57,7 +60,7 @@ export function DomainApprovalPrompt({
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0-10.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.25-8.25-3.286Z" />
           </svg>
           <span className="text-xs text-amber-800">
-            This task needs access to <span className="font-semibold">{request.domain}</span>. Allow?
+            {t('domain.needsAccess', { domain: request.domain })}
           </span>
         </div>
         <div className="flex gap-2">
@@ -65,13 +68,13 @@ export function DomainApprovalPrompt({
             onClick={() => onApprove(request.id)}
             className="text-xs bg-green-500 text-white rounded px-3 py-1 hover:bg-green-600 transition-colors"
           >
-            Allow
+            {t('domain.allow')}
           </button>
           <button
             onClick={() => onDeny(request.id)}
             className="text-xs bg-red-500 text-white rounded px-3 py-1 hover:bg-red-600 transition-colors"
           >
-            Deny
+            {t('domain.deny')}
           </button>
         </div>
       </div>

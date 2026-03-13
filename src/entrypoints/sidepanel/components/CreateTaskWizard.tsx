@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useWizardStore, type WizardStep } from '../stores/wizard-store';
 import { CodeBlock } from './CodeBlock';
 
-const STEPS: { key: WizardStep; label: string }[] = [
-  { key: 'describe', label: 'Describe' },
-  { key: 'domains', label: 'Domains' },
-  { key: 'observe', label: 'Observe' },
-  { key: 'review', label: 'Review' },
-  { key: 'test', label: 'Test' },
-  { key: 'schedule', label: 'Schedule' },
+const STEP_KEYS: { key: WizardStep; labelKey: string }[] = [
+  { key: 'describe', labelKey: 'wizard.step.describe' },
+  { key: 'domains', labelKey: 'wizard.step.domains' },
+  { key: 'observe', labelKey: 'wizard.step.observe' },
+  { key: 'review', labelKey: 'wizard.step.review' },
+  { key: 'test', labelKey: 'wizard.step.test' },
+  { key: 'schedule', labelKey: 'wizard.step.schedule' },
 ];
 
 interface CreateTaskWizardProps {
@@ -17,9 +18,10 @@ interface CreateTaskWizardProps {
 }
 
 export function CreateTaskWizard({ onComplete, onCancel }: CreateTaskWizardProps) {
+  const { t } = useTranslation();
   const store = useWizardStore();
 
-  const currentIdx = STEPS.findIndex(s => s.key === store.step);
+  const currentIdx = STEP_KEYS.findIndex(s => s.key === store.step);
 
   const handleCancel = () => {
     store.reset();
@@ -31,11 +33,11 @@ export function CreateTaskWizard({ onComplete, onCancel }: CreateTaskWizardProps
       {/* Step indicator */}
       <div className="px-4 pt-4 pb-2">
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-base font-semibold">New Task</h2>
+          <h2 className="text-base font-semibold">{t('wizard.newTask')}</h2>
           <button
             onClick={handleCancel}
             className="text-gray-400 hover:text-gray-600"
-            aria-label="Cancel"
+            aria-label={t('wizard.cancelAriaLabel')}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -43,7 +45,7 @@ export function CreateTaskWizard({ onComplete, onCancel }: CreateTaskWizardProps
           </button>
         </div>
         <div className="flex items-center gap-1">
-          {STEPS.map((s, i) => (
+          {STEP_KEYS.map((s, i) => (
             <div key={s.key} className="flex items-center flex-1">
               <div
                 className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-medium ${
@@ -62,14 +64,14 @@ export function CreateTaskWizard({ onComplete, onCancel }: CreateTaskWizardProps
                   i + 1
                 )}
               </div>
-              {i < STEPS.length - 1 && (
+              {i < STEP_KEYS.length - 1 && (
                 <div className={`flex-1 h-0.5 mx-1 ${i < currentIdx ? 'bg-blue-500' : 'bg-gray-200'}`} />
               )}
             </div>
           ))}
         </div>
         <p className="text-xs text-gray-500 mt-1">
-          Step {currentIdx + 1}: {STEPS[currentIdx].label}
+          {t('wizard.stepIndicator', { current: currentIdx + 1, label: t(STEP_KEYS[currentIdx].labelKey) })}
         </p>
       </div>
 
@@ -96,7 +98,7 @@ export function CreateTaskWizard({ onComplete, onCancel }: CreateTaskWizardProps
           onClick={handleCancel}
           className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
         >
-          Cancel
+          {t('wizard.cancel')}
         </button>
         <div className="flex gap-2">
           {currentIdx > 0 && (
@@ -105,7 +107,7 @@ export function CreateTaskWizard({ onComplete, onCancel }: CreateTaskWizardProps
               disabled={store.loading}
               className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
             >
-              Back
+              {t('wizard.back')}
             </button>
           )}
           {store.step !== 'schedule' && store.step !== 'observe' && (
@@ -118,6 +120,7 @@ export function CreateTaskWizard({ onComplete, onCancel }: CreateTaskWizardProps
 }
 
 function NextButton() {
+  const { t } = useTranslation();
   const { step, description, domains, nextStep, loading } = useWizardStore();
 
   const isDisabled = (() => {
@@ -133,37 +136,39 @@ function NextButton() {
       disabled={isDisabled}
       className="bg-blue-500 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50"
     >
-      Next
+      {t('wizard.next')}
     </button>
   );
 }
 
 function DescribeStep() {
+  const { t } = useTranslation();
   const { description, setDescription } = useWizardStore();
 
   return (
     <div className="space-y-3">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          What do you want to automate?
+          {t('wizard.describe.label')}
         </label>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="e.g., Scrape product prices from the current page and save them..."
+          placeholder={t('wizard.describe.placeholder')}
           className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
           rows={5}
           autoFocus
         />
       </div>
       <p className="text-xs text-gray-400">
-        Describe the task in natural language. Be specific about what elements to interact with and what data to collect.
+        {t('wizard.describe.hint')}
       </p>
     </div>
   );
 }
 
 function DomainsStep() {
+  const { t } = useTranslation();
   const { domains, currentTabUrl, addDomain, removeDomain } = useWizardStore();
   const [newDomain, setNewDomain] = useState('');
 
@@ -183,16 +188,16 @@ function DomainsStep() {
     <div className="space-y-3">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Allowed domains
+          {t('wizard.domains.label')}
         </label>
         <p className="text-xs text-gray-400 mb-2">
-          The script will only run on these domains.
+          {t('wizard.domains.hint')}
         </p>
       </div>
 
       {currentTabUrl && (
         <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-          Current tab: <span className="font-mono">{currentTabUrl}</span>
+          {t('wizard.domains.currentTab')} <span className="font-mono">{currentTabUrl}</span>
         </div>
       )}
 
@@ -203,7 +208,7 @@ function DomainsStep() {
             <button
               onClick={() => removeDomain(domain)}
               className="text-blue-400 hover:text-red-500 transition-colors"
-              aria-label={`Remove ${domain}`}
+              aria-label={t('wizard.domains.removeDomain', { domain })}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -219,7 +224,7 @@ function DomainsStep() {
           value={newDomain}
           onChange={(e) => setNewDomain(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-          placeholder="example.com"
+          placeholder={t('wizard.domains.placeholder')}
           className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
         <button
@@ -227,7 +232,7 @@ function DomainsStep() {
           disabled={!newDomain.trim()}
           className="bg-gray-100 text-gray-700 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
         >
-          Add
+          {t('wizard.domains.add')}
         </button>
       </div>
     </div>
@@ -235,6 +240,7 @@ function DomainsStep() {
 }
 
 function ObserveStep() {
+  const { t } = useTranslation();
   const { loading, generatedScript } = useWizardStore();
 
   useEffect(() => {
@@ -253,9 +259,9 @@ function ObserveStep() {
     <div className="flex flex-col items-center justify-center py-12 space-y-4">
       <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
       <div className="text-center">
-        <p className="text-sm font-medium text-gray-700">Observing page...</p>
+        <p className="text-sm font-medium text-gray-700">{t('wizard.observe.title')}</p>
         <p className="text-xs text-gray-400 mt-1">
-          The explorer agent is analyzing the page and generating a script.
+          {t('wizard.observe.description')}
         </p>
       </div>
     </div>
@@ -263,27 +269,28 @@ function ObserveStep() {
 }
 
 function ReviewStep() {
+  const { t } = useTranslation();
   const { generatedScript, astValid, astErrors, securityPassed, securityReviewDetails } = useWizardStore();
 
   return (
     <div className="space-y-3">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Generated Script
+          {t('wizard.review.generatedScript')}
         </label>
         <div className="flex items-center gap-2 mb-2">
-          <StatusBadge label="AST" passed={astValid} />
-          <StatusBadge label="Security" passed={securityPassed} />
+          <StatusBadge label={t('wizard.review.astLabel')} passed={astValid} />
+          <StatusBadge label={t('wizard.review.securityLabel')} passed={securityPassed} />
         </div>
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
-        <CodeBlock code={generatedScript || 'No script generated.'} />
+        <CodeBlock code={generatedScript || t('wizard.review.noScript')} />
       </div>
 
       {!astValid && astErrors.length > 0 && (
         <div className="px-3 py-2 bg-red-50 text-red-700 text-xs rounded-lg space-y-1">
-          <p className="font-medium">AST validation failed:</p>
+          <p className="font-medium">{t('wizard.review.astFailed')}</p>
           <ul className="list-disc list-inside space-y-0.5">
             {astErrors.map((err, i) => (
               <li key={i}>{err}</li>
@@ -294,7 +301,7 @@ function ReviewStep() {
 
       {!securityPassed && (
         <div className="px-3 py-2 bg-yellow-50 text-yellow-700 text-xs rounded-lg space-y-1">
-          <p className="font-medium">Security review did not pass.</p>
+          <p className="font-medium">{t('wizard.review.securityNotPassed')}</p>
           {securityReviewDetails.length > 0 ? (
             <ul className="list-disc list-inside space-y-0.5">
               {securityReviewDetails
@@ -304,7 +311,7 @@ function ReviewStep() {
                 )))}
             </ul>
           ) : (
-            <p>The script has not been approved by the security reviewer.</p>
+            <p>{t('wizard.review.securityNotApproved')}</p>
           )}
         </div>
       )}
@@ -336,16 +343,17 @@ function StatusBadge({ label, passed }: { label: string; passed: boolean }) {
 }
 
 function TestStep() {
+  const { t } = useTranslation();
   const { loading, testResult, runTest } = useWizardStore();
 
   return (
     <div className="space-y-3">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Test Run
+          {t('wizard.test.label')}
         </label>
         <p className="text-xs text-gray-400 mb-3">
-          Run the generated script against the current tab to verify it works correctly.
+          {t('wizard.test.hint')}
         </p>
       </div>
 
@@ -354,14 +362,14 @@ function TestStep() {
           onClick={runTest}
           className="w-full bg-blue-500 text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-blue-600 transition-colors"
         >
-          Run Test
+          {t('wizard.test.runTest')}
         </button>
       )}
 
       {loading && (
         <div className="flex items-center justify-center py-8 space-x-3">
           <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
-          <span className="text-sm text-gray-600">Running test...</span>
+          <span className="text-sm text-gray-600">{t('wizard.test.running')}</span>
         </div>
       )}
 
@@ -384,7 +392,7 @@ function TestStep() {
               </svg>
             )}
             <span className={`text-sm font-medium ${testResult.success ? 'text-green-700' : 'text-red-700'}`}>
-              {testResult.success ? 'Test passed' : 'Test failed'}
+              {testResult.success ? t('wizard.test.passed') : t('wizard.test.failed')}
             </span>
           </div>
 
@@ -402,7 +410,7 @@ function TestStep() {
             onClick={runTest}
             className="mt-2 text-xs text-blue-500 hover:text-blue-700 transition-colors"
           >
-            Re-run test
+            {t('wizard.test.rerun')}
           </button>
         </div>
       )}
@@ -411,6 +419,7 @@ function TestStep() {
 }
 
 function ScheduleStep({ onComplete }: { onComplete: () => void }) {
+  const { t } = useTranslation();
   const { schedule, setSchedule, loading, createTask } = useWizardStore();
   const [intervalValue, setIntervalValue] = useState(
     schedule.type === 'interval' ? String(schedule.intervalMinutes) : '30'
@@ -427,10 +436,10 @@ function ScheduleStep({ onComplete }: { onComplete: () => void }) {
     <div className="space-y-4">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Schedule
+          {t('wizard.schedule.label')}
         </label>
         <p className="text-xs text-gray-400 mb-3">
-          Choose when this task should run.
+          {t('wizard.schedule.hint')}
         </p>
       </div>
 
@@ -444,8 +453,8 @@ function ScheduleStep({ onComplete }: { onComplete: () => void }) {
             className="w-4 h-4 text-blue-500"
           />
           <div>
-            <p className="text-sm font-medium text-gray-700">Manual</p>
-            <p className="text-xs text-gray-400">Run only when you click the Run button</p>
+            <p className="text-sm font-medium text-gray-700">{t('wizard.schedule.manual')}</p>
+            <p className="text-xs text-gray-400">{t('wizard.schedule.manualDescription')}</p>
           </div>
         </label>
 
@@ -458,11 +467,11 @@ function ScheduleStep({ onComplete }: { onComplete: () => void }) {
             className="w-4 h-4 text-blue-500 mt-0.5"
           />
           <div className="flex-1">
-            <p className="text-sm font-medium text-gray-700">Interval</p>
-            <p className="text-xs text-gray-400 mb-2">Repeat automatically at a fixed interval</p>
+            <p className="text-sm font-medium text-gray-700">{t('wizard.schedule.interval')}</p>
+            <p className="text-xs text-gray-400 mb-2">{t('wizard.schedule.intervalDescription')}</p>
             {schedule.type === 'interval' && (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500">Every</span>
+                <span className="text-xs text-gray-500">{t('wizard.schedule.every')}</span>
                 <input
                   type="number"
                   min="1"
@@ -474,7 +483,7 @@ function ScheduleStep({ onComplete }: { onComplete: () => void }) {
                   }}
                   className="w-20 rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
-                <span className="text-xs text-gray-500">minutes</span>
+                <span className="text-xs text-gray-500">{t('wizard.schedule.minutes')}</span>
               </div>
             )}
           </div>
@@ -486,7 +495,7 @@ function ScheduleStep({ onComplete }: { onComplete: () => void }) {
         disabled={loading}
         className="w-full bg-blue-500 text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50"
       >
-        {loading ? 'Creating...' : 'Create Task'}
+        {loading ? t('wizard.schedule.creating') : t('wizard.schedule.createTask')}
       </button>
     </div>
   );

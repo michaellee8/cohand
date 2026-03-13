@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import type { Task, ScriptRun } from '../../../types';
 
 interface TaskCardProps {
@@ -10,6 +11,8 @@ interface TaskCardProps {
 }
 
 export function TaskCard({ task, isSelected, lastRun, isRunning, onSelect, onRun }: TaskCardProps) {
+  const { t } = useTranslation();
+
   return (
     <div
       className={`p-3 rounded-lg border cursor-pointer transition-colors ${
@@ -22,7 +25,7 @@ export function TaskCard({ task, isSelected, lastRun, isRunning, onSelect, onRun
         <div className="flex items-center gap-2 ml-2">
           {task.schedule.type === 'interval' && (
             <span className="text-xs text-gray-400">
-              every {task.schedule.intervalMinutes}m
+              {t('taskCard.every', { minutes: task.schedule.intervalMinutes })}
             </span>
           )}
           <button
@@ -33,9 +36,9 @@ export function TaskCard({ task, isSelected, lastRun, isRunning, onSelect, onRun
             {isRunning ? (
               <span className="flex items-center gap-1">
                 <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Running
+                {t('taskCard.running')}
               </span>
-            ) : task.disabled ? 'Disabled' : 'Run'}
+            ) : task.disabled ? t('taskCard.disabled') : t('taskCard.run')}
           </button>
         </div>
       </div>
@@ -52,10 +55,10 @@ export function TaskCard({ task, isSelected, lastRun, isRunning, onSelect, onRun
                 }`}
               />
               <span className={lastRun.success ? 'text-green-600' : 'text-red-600'}>
-                {lastRun.success ? 'Pass' : 'Fail'}
+                {lastRun.success ? t('taskCard.pass') : t('taskCard.fail')}
               </span>
             </span>
-            <span>{formatRelativeTime(lastRun.ranAt)}</span>
+            <span>{formatRelativeTime(lastRun.ranAt, t)}</span>
           </>
         )}
       </div>
@@ -63,14 +66,14 @@ export function TaskCard({ task, isSelected, lastRun, isRunning, onSelect, onRun
   );
 }
 
-function formatRelativeTime(isoString: string): string {
+function formatRelativeTime(isoString: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const diff = Date.now() - new Date(isoString).getTime();
   const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return 'just now';
+  if (seconds < 60) return t('taskCard.justNow');
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return t('taskCard.minutesAgo', { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t('taskCard.hoursAgo', { count: hours });
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return t('taskCard.daysAgo', { count: days });
 }

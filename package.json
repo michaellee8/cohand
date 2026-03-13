@@ -29,10 +29,12 @@
     "@tailwindcss/vite": "^4.2.1",
     "acorn": "^8.16.0",
     "acorn-walk": "^8.3.5",
+    "i18next": "^25.8.18",
     "prism-react-renderer": "^2.4.1",
     "quickjs-emscripten": "^0.32.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-i18next": "^16.5.8",
     "tailwindcss": "^4.2.1",
     "wxt": "^0.20.18",
     "zustand": "^5.0.11"

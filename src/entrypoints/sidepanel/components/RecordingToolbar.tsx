@@ -1,8 +1,10 @@
 // src/entrypoints/sidepanel/components/RecordingToolbar.tsx
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useRecordingStore } from '../stores/recording-store';
 
 export function RecordingToolbar() {
+  const { t } = useTranslation();
   const { isRecording, isPaused, voiceEnabled, session, stopRecording, togglePause, toggleVoice } = useRecordingStore();
   const [elapsed, setElapsed] = useState(0);
 
@@ -29,17 +31,17 @@ export function RecordingToolbar() {
         {String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
       </span>
       <span className="text-xs text-red-600 bg-red-100 rounded-full px-2 py-0.5">
-        {stepCount} step{stepCount !== 1 ? 's' : ''}
+        {t('recordingToolbar.step', { count: stepCount })}
       </span>
       <div className="flex-1" />
-      <button onClick={togglePause} className="text-sm text-red-600 hover:text-red-800" title={isPaused ? 'Resume' : 'Pause'}>
-        {isPaused ? '▶' : '⏸'}
+      <button onClick={togglePause} className="text-sm text-red-600 hover:text-red-800" title={isPaused ? t('recordingToolbar.resume') : t('recordingToolbar.pause')}>
+        {isPaused ? '\u25B6' : '\u23F8'}
       </button>
-      <button onClick={toggleVoice} className={`text-sm ${voiceEnabled ? 'text-red-600' : 'text-gray-400'} hover:text-red-800`} title="Toggle voice">
-        🎤
+      <button onClick={toggleVoice} className={`text-sm ${voiceEnabled ? 'text-red-600' : 'text-gray-400'} hover:text-red-800`} title={t('recordingToolbar.toggleVoice')}>
+        {'\uD83C\uDFA4'}
       </button>
       <button onClick={stopRecording} className="bg-red-500 text-white text-sm rounded-lg px-3 py-1 hover:bg-red-600">
-        Stop
+        {t('recordingToolbar.stop')}
       </button>
     </div>
   );

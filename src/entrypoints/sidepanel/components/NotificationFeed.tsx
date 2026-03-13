@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import type { TaskNotification } from '../../../types';
 
 interface NotificationFeedProps {
@@ -6,8 +7,10 @@ interface NotificationFeedProps {
 }
 
 export function NotificationFeed({ notifications, onMarkRead }: NotificationFeedProps) {
+  const { t } = useTranslation();
+
   if (notifications.length === 0) {
-    return <p className="text-xs text-gray-400 p-4">No notifications</p>;
+    return <p className="text-xs text-gray-400 p-4">{t('notifications.empty')}</p>;
   }
 
   return (

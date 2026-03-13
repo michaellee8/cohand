@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useTasksStore } from '../stores/tasks-store';
 import { useSettingsStore } from '../stores/settings-store';
 import { useWizardStore } from '../stores/wizard-store';
@@ -12,6 +13,7 @@ interface TasksPageProps {
 }
 
 export function TasksPage({ onOpenSettings }: TasksPageProps) {
+  const { t } = useTranslation();
   const { tasks, selectedTaskId, runs, scriptVersions, taskStates, notifications, loading, runningTaskId,
     fetchTasks, selectTask, runTask, deleteTask, updateTask, markNotificationRead } = useTasksStore();
   const { settings, hasApiKey, codexConnected } = useSettingsStore();
@@ -74,31 +76,31 @@ export function TasksPage({ onOpenSettings }: TasksPageProps) {
     <div className="flex flex-col h-full">
       {!llmConfigured && (
         <div className="mx-4 mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center justify-between">
-          <p className="text-sm text-yellow-800">No LLM configured. Set up a provider to run tasks.</p>
+          <p className="text-sm text-yellow-800">{t('tasks.noLlmWarning')}</p>
           <button
             onClick={onOpenSettings}
             className="bg-blue-500 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-blue-600 transition-colors shrink-0 ml-3"
           >
-            Go to Settings
+            {t('tasks.goToSettings')}
           </button>
         </div>
       )}
       <div className="p-4 flex items-center justify-between">
-        <h2 className="text-base font-semibold">Tasks</h2>
+        <h2 className="text-base font-semibold">{t('tasks.title')}</h2>
         <button
           onClick={() => setShowWizard(true)}
           className="bg-blue-500 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-blue-600 transition-colors"
         >
-          + New Task
+          {t('tasks.newTask')}
         </button>
       </div>
 
       {loading ? (
-        <div className="p-4 text-center text-gray-400 text-sm">Loading...</div>
+        <div className="p-4 text-center text-gray-400 text-sm">{t('tasks.loading')}</div>
       ) : tasks.length === 0 ? (
         <div className="text-center text-gray-400 mt-12">
-          <p className="text-sm">No tasks yet</p>
-          <p className="text-xs mt-1">Create your first automation task</p>
+          <p className="text-sm">{t('tasks.noTasks')}</p>
+          <p className="text-xs mt-1">{t('tasks.noTasksHint')}</p>
         </div>
       ) : (
         <div className="px-4 space-y-2 overflow-y-auto flex-1">
@@ -122,7 +124,7 @@ export function TasksPage({ onOpenSettings }: TasksPageProps) {
 
       {notifications.length > 0 && (
         <div className="border-t border-gray-200 max-h-48 overflow-y-auto">
-          <div className="px-4 py-2 text-xs font-medium text-gray-500">Notifications</div>
+          <div className="px-4 py-2 text-xs font-medium text-gray-500">{t('notifications.title')}</div>
           <NotificationFeed notifications={notifications} onMarkRead={markNotificationRead} />
         </div>
       )}

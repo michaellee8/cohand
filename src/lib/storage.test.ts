@@ -62,7 +62,7 @@ describe('getSettings', () => {
       llmProvider: 'anthropic',
       llmModel: 'claude-4',
       yoloMode: true,
-      language: 'ja',
+      language: 'zh-TW',
     };
     await setSettings(custom);
     const settings = await getSettings();
@@ -187,7 +187,7 @@ describe('migrateStorage', () => {
       llmProvider: 'anthropic',
       llmModel: 'claude-4',
       yoloMode: true,
-      language: 'ja',
+      language: 'zh-TW',
     };
     await setSettings(custom);
     await migrateStorage();
@@ -201,7 +201,7 @@ describe('migrateStorage', () => {
       llmProvider: 'gemini',
       llmModel: 'gemini-pro',
       yoloMode: false,
-      language: 'fr',
+      language: 'zh-CN',
     };
     await setSettings(custom);
     await migrateStorage(); // run again

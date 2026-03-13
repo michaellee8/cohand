@@ -1,4 +1,5 @@
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { TabBar, type Tab } from './components/TabBar';
 import { useTasksStore } from './stores/tasks-store';
 import { useSettingsStore } from './stores/settings-store';
@@ -25,24 +26,30 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
 
   render() {
     if (this.state.hasError) {
-      return (
-        <div className="h-screen flex flex-col items-center justify-center gap-4 p-6 text-center">
-          <p className="text-lg font-semibold text-gray-900">Something went wrong</p>
-          <p className="text-sm text-gray-500">{this.state.error?.message}</p>
-          <button
-            onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
-            className="bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-600"
-          >
-            Reload
-          </button>
-        </div>
-      );
+      return <ErrorFallback error={this.state.error} onReload={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }} />;
     }
     return this.props.children;
   }
 }
 
+function ErrorFallback({ error, onReload }: { error: Error | null; onReload: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="h-screen flex flex-col items-center justify-center gap-4 p-6 text-center">
+      <p className="text-lg font-semibold text-gray-900">{t('app.somethingWentWrong')}</p>
+      <p className="text-sm text-gray-500">{error?.message}</p>
+      <button
+        onClick={onReload}
+        className="bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-600"
+      >
+        {t('app.reload')}
+      </button>
+    </div>
+  );
+}
+
 export function App() {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<Tab>('chat');
   const [showSettings, setShowSettings] = useState(false);
   const unreadCount = useTasksStore(state => state.unreadCount);
@@ -55,7 +62,7 @@ export function App() {
   if (showSettings) {
     return (
       <ErrorBoundary>
-        <Suspense fallback={<div className="flex items-center justify-center h-screen text-gray-400 text-sm">Loading...</div>}>
+        <Suspense fallback={<div className="flex items-center justify-center h-screen text-gray-400 text-sm">{t('app.loading')}</div>}>
           <SettingsPage onBack={() => setShowSettings(false)} />
         </Suspense>
       </ErrorBoundary>
@@ -72,7 +79,7 @@ export function App() {
           unreadCount={unreadCount}
         />
         <main className="flex-1 overflow-y-auto">
-          <Suspense fallback={<div className="flex items-center justify-center h-full text-gray-400 text-sm">Loading...</div>}>
+          <Suspense fallback={<div className="flex items-center justify-center h-full text-gray-400 text-sm">{t('app.loading')}</div>}>
             {activeTab === 'chat' && <ChatPage onOpenSettings={() => setShowSettings(true)} />}
             {activeTab === 'tasks' && <TasksPage onOpenSettings={() => setShowSettings(true)} />}
           </Suspense>

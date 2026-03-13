@@ -1,15 +1,17 @@
 // src/entrypoints/sidepanel/components/LiveStepList.tsx
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useRecordingStore } from '../stores/recording-store';
 
 const ACTION_ICONS: Record<string, string> = {
-  click: '🖱️',
-  type: '⌨️',
-  navigate: '🌐',
-  narration: '🎤',
+  click: '\uD83D\uDDB1\uFE0F',
+  type: '\u2328\uFE0F',
+  navigate: '\uD83C\uDF10',
+  narration: '\uD83C\uDFA4',
 };
 
 export function LiveStepList() {
+  const { t } = useTranslation();
   const { session, removeStep } = useRecordingStore();
   const endRef = useRef<HTMLDivElement>(null);
   const steps = session?.steps ?? [];
@@ -21,7 +23,7 @@ export function LiveStepList() {
   if (!steps.length) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
-        Interact with the page to capture steps...
+        {t('liveSteps.emptyState')}
       </div>
     );
   }
@@ -33,7 +35,7 @@ export function LiveStepList() {
           key={step.id}
           className="group flex items-start gap-2 p-2 bg-gray-50 rounded-lg animate-[slideIn_0.2s_ease-out]"
         >
-          <span className="text-base mt-0.5">{ACTION_ICONS[step.action] ?? '❓'}</span>
+          <span className="text-base mt-0.5">{ACTION_ICONS[step.action] ?? '\u2753'}</span>
           <div className="flex-1 min-w-0">
             <span className="text-xs text-gray-400 mr-1">{i + 1}.</span>
             <span className="text-sm text-gray-800">
@@ -48,9 +50,10 @@ export function LiveStepList() {
           <button
             onClick={() => removeStep(step.id)}
             className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 text-xs p-1 transition-opacity"
-            title="Remove step"
+            title={t('liveSteps.removeStep')}
+            aria-label={t('liveSteps.removeStep')}
           >
-            ✕
+            {'\u2715'}
           </button>
         </div>
       ))}

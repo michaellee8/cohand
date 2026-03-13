@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../stores/chat-store';
 import { useSettingsStore } from '../stores/settings-store';
 import { useRecordingStore } from '../stores/recording-store';
@@ -17,6 +18,7 @@ interface ChatPageProps {
 }
 
 export function ChatPage({ onOpenSettings }: ChatPageProps) {
+  const { t } = useTranslation();
   const { messages, isStreaming, error, explorerSteps, sendMessage, cancelStream,
     generatedScript, generatedDescription, clearGeneratedScript } = useChatStore();
   const { settings, hasApiKey, codexConnected } = useSettingsStore();
@@ -122,14 +124,14 @@ export function ChatPage({ onOpenSettings }: ChatPageProps) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
           </svg>
           <div>
-            <p className="text-base font-semibold text-gray-900">No LLM configured</p>
-            <p className="text-sm text-gray-500 mt-1">Set up your LLM provider to start using Cohand</p>
+            <p className="text-base font-semibold text-gray-900">{t('chat.noLlmConfigured')}</p>
+            <p className="text-sm text-gray-500 mt-1">{t('chat.noLlmDescription')}</p>
           </div>
           <button
             onClick={onOpenSettings}
             className="bg-blue-500 text-white rounded-lg px-6 py-2.5 text-sm font-medium hover:bg-blue-600 transition-colors"
           >
-            Go to Settings
+            {t('chat.goToSettings')}
           </button>
         </div>
       ) : isRecording ? (
@@ -151,7 +153,7 @@ export function ChatPage({ onOpenSettings }: ChatPageProps) {
             <div className="flex justify-start mb-3">
               <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-800">
                 <p className="font-medium mb-2">
-                  I recorded your workflow ({session.steps.length} step{session.steps.length !== 1 ? 's' : ''}):
+                  {t('chat.recordedWorkflow', { count: session.steps.length })}
                 </p>
                 <ol className="list-decimal list-inside space-y-1 mb-2">
                   {session.steps.map((step, i) => (
@@ -162,7 +164,7 @@ export function ChatPage({ onOpenSettings }: ChatPageProps) {
                   ))}
                 </ol>
                 <p className="text-gray-500 text-xs mt-2">
-                  What would you like me to do with this workflow? Type your instructions below.
+                  {t('chat.workflowInstructions')}
                 </p>
               </div>
             </div>
@@ -172,20 +174,20 @@ export function ChatPage({ onOpenSettings }: ChatPageProps) {
           {hasSubmittedRefinement && generatedDescription && (
             <div className="flex justify-start mb-3">
               <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-800">
-                <p className="font-medium mb-1">Task Description:</p>
+                <p className="font-medium mb-1">{t('chat.taskDescription')}</p>
                 <p className="mb-3">{generatedDescription}</p>
                 <div className="flex gap-2">
                   <button
                     onClick={handleCreateTask}
                     className="bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors"
                   >
-                    Create Task
+                    {t('chat.createTask')}
                   </button>
                   <button
                     onClick={() => clearGeneratedScript()}
                     className="text-sm text-gray-500 px-2 hover:text-gray-700 transition-colors"
                   >
-                    Discard
+                    {t('chat.discard')}
                   </button>
                 </div>
               </div>
@@ -198,7 +200,7 @@ export function ChatPage({ onOpenSettings }: ChatPageProps) {
               <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-800">
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
-                  <span className="text-gray-500">Generating script from your recording...</span>
+                  <span className="text-gray-500">{t('chat.generatingScript')}</span>
                 </div>
               </div>
             </div>
@@ -246,9 +248,9 @@ export function ChatPage({ onOpenSettings }: ChatPageProps) {
               }
             }}
             placeholder={recordingJustCompleted && !hasSubmittedRefinement
-              ? "Describe what you want this workflow to do..."
-              : "Describe your task..."}
-            aria-label="Chat message input"
+              ? t('chat.inputPlaceholderRefinement')
+              : t('chat.inputPlaceholder')}
+            aria-label={t('chat.chatMessageInput')}
             className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             disabled={isStreaming || isRecording}
           />
@@ -256,8 +258,8 @@ export function ChatPage({ onOpenSettings }: ChatPageProps) {
             onClick={() => setShowRecordModal(true)}
             disabled={isRecording || isStreaming}
             className="text-gray-400 hover:text-red-500 p-2 rounded-lg transition-colors disabled:opacity-30"
-            title="Record workflow"
-            aria-label="Record workflow"
+            title={t('chat.recordWorkflow')}
+            aria-label={t('chat.recordWorkflow')}
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
               <circle cx="12" cy="12" r="8" />
@@ -268,7 +270,7 @@ export function ChatPage({ onOpenSettings }: ChatPageProps) {
               onClick={cancelStream}
               className="bg-red-500 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-red-600 transition-colors"
             >
-              Stop
+              {t('chat.stop')}
             </button>
           ) : (
             <button
@@ -278,7 +280,7 @@ export function ChatPage({ onOpenSettings }: ChatPageProps) {
               disabled={!input.trim()}
               className="bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50"
             >
-              Send
+              {t('chat.send')}
             </button>
           )}
         </div>

@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 export type ExplorerStep =
   | { type: 'observing'; summary?: string }
   | { type: 'screenshot' }
@@ -9,12 +11,20 @@ interface ExplorerAgentFeedbackProps {
   steps: ExplorerStep[];
 }
 
-const stepConfig: Record<ExplorerStep['type'], { label: string; icon: string }> = {
-  observing: { label: 'Observing page structure...', icon: 'eye' },
-  screenshot: { label: 'Taking screenshot...', icon: 'camera' },
-  generating: { label: 'Generating script...', icon: 'code' },
-  complete: { label: 'Script ready', icon: 'check' },
-  error: { label: 'Error', icon: 'x' },
+const stepLabelKeys: Record<ExplorerStep['type'], string> = {
+  observing: 'explorer.observing',
+  screenshot: 'explorer.screenshot',
+  generating: 'explorer.generating',
+  complete: 'explorer.complete',
+  error: 'explorer.error',
+};
+
+const stepIcons: Record<ExplorerStep['type'], string> = {
+  observing: 'eye',
+  screenshot: 'camera',
+  generating: 'code',
+  complete: 'check',
+  error: 'x',
 };
 
 function StepIcon({ type, isActive }: { type: string; isActive: boolean }) {
@@ -59,21 +69,24 @@ function StepIcon({ type, isActive }: { type: string; isActive: boolean }) {
 }
 
 export function ExplorerAgentFeedback({ steps }: ExplorerAgentFeedbackProps) {
+  const { t } = useTranslation();
+
   if (steps.length === 0) return null;
 
   return (
     <div className="flex justify-start mb-3">
       <div className="max-w-[85%] rounded-lg px-3 py-2 bg-gray-50 border border-gray-200">
-        <div className="text-xs font-medium text-gray-500 mb-2">Explorer Agent</div>
+        <div className="text-xs font-medium text-gray-500 mb-2">{t('explorer.title')}</div>
         <div className="space-y-1.5">
           {steps.map((step, idx) => {
             const isLast = idx === steps.length - 1;
             const isActive = isLast && step.type !== 'complete' && step.type !== 'error';
-            const config = stepConfig[step.type];
+            const icon = stepIcons[step.type];
+            const labelKey = stepLabelKeys[step.type];
 
             return (
               <div key={idx} className="flex items-center gap-2">
-                <StepIcon type={config.icon} isActive={isActive} />
+                <StepIcon type={icon} isActive={isActive} />
                 <span className={`text-xs ${
                   step.type === 'error'
                     ? 'text-red-600'
@@ -81,7 +94,7 @@ export function ExplorerAgentFeedback({ steps }: ExplorerAgentFeedbackProps) {
                       ? 'text-blue-600'
                       : 'text-gray-600'
                 }`}>
-                  {step.type === 'error' ? step.message : config.label}
+                  {step.type === 'error' ? step.message : t(labelKey)}
                   {step.type === 'observing' && step.summary && (
                     <span className="ml-1 text-gray-400">({step.summary})</span>
                   )}
