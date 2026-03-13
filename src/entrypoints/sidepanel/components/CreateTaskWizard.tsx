@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useWizardStore, type WizardStep } from '../stores/wizard-store';
+import { CodeBlock } from './CodeBlock';
 
 const STEPS: { key: WizardStep; label: string }[] = [
   { key: 'describe', label: 'Describe' },
@@ -277,9 +278,7 @@ function ReviewStep() {
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
-        <pre className="p-3 text-xs font-mono text-gray-800 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap">
-          {generatedScript || 'No script generated.'}
-        </pre>
+        <CodeBlock code={generatedScript || 'No script generated.'} />
       </div>
 
       {!astValid && astErrors.length > 0 && (
